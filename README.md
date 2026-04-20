@@ -4,14 +4,23 @@ Streamlit app that generates a *plan commercial* PowerPoint deck (cover + one sl
 
 Product slides mirror the layout of the reference MIO Canal Gros deck: Canal banner top-left, brand logo top-right, product name, two price tables (*Prix à l'unité* / *Prix à la caisse*), packshot on the wood background.
 
-## Run
+## Run (easy mode)
 
-```
-pip install -r requirements.txt
-streamlit run app.py
-```
+One-time: install **Python 3.11+** from https://www.python.org/downloads/
+(on Windows, **tick "Add python.exe to PATH"** during setup).
 
-Then open the URL Streamlit prints.
+Then:
+
+- **Windows** — double-click `run.bat`
+- **macOS / Linux** — in a terminal: `./run.sh`
+
+That's it. The script installs dependencies the first time and opens the app in your browser. To stop: close the window (or `Ctrl+C`).
+
+To run it again later: just double-click `run.bat` (or `./run.sh`) again — subsequent launches are instant since dependencies are already installed.
+
+### Getting the code without Git
+
+On the GitHub page click **Code → Download ZIP**, extract it, then double-click `run.bat` inside the extracted folder. No `git` install needed.
 
 ## Workflow
 
