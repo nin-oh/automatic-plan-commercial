@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from plan_commercial import (  # noqa: E402
     Deck, Group, Product, SubGroup, build_pptx, read_excel, write_template,
+    render_product, render_cover,
 )
 from plan_commercial.excel_io import PRODUIT_COLS  # noqa: E402
 
@@ -147,6 +148,47 @@ with tab_content:
         key="products_editor",
     )
     ss.products_df = edited
+
+    # ---- Live preview ----
+    st.markdown("#### Live preview")
+    df = ss.products_df
+    if len(df) == 0:
+        st.info("Add at least one product to see the preview.")
+    else:
+        labels = [
+            f"#{i + 1}  {row.get('nom') or '(sans nom)'}"
+            f"  —  {row.get('groupe') or ''} / {row.get('sous_groupe') or ''}"
+            for i, (_, row) in enumerate(df.iterrows())
+        ]
+        labels = ["Cover"] + labels
+        choice = st.selectbox("Slide to preview", labels, index=min(1, len(labels) - 1))
+
+        deck = Deck(
+            titre=ss.titre, canal=ss.canal, mois=ss.mois,
+            banner_path=resolve_image(ss.banner),
+            background_path=resolve_image(ss.background),
+            cover_photo_path=resolve_image(ss.cover_photo),
+        )
+        if choice == "Cover":
+            st.image(render_cover(deck), use_column_width=True)
+        else:
+            idx = labels.index(choice) - 1
+            row = df.iloc[idx]
+            group = Group(
+                nom=str(row.get("groupe") or ""),
+                logo_path=resolve_image(row.get("logo_groupe")),
+            )
+            product = Product(
+                nom=str(row.get("nom") or ""),
+                packshot_path=resolve_image(row.get("packshot")),
+                nom_image_path=resolve_image(row.get("nom_image")),
+                prix_gros=float(row.get("prix_gros") or 0),
+                prix_gros_net=float(row.get("prix_gros_net") or 0),
+                colisage=str(row.get("colisage") or ""),
+                colisage_prix_gros=float(row.get("colisage_prix_gros") or 0),
+                colisage_prix_gros_net=float(row.get("colisage_prix_gros_net") or 0),
+            )
+            st.image(render_product(deck, group, product), use_column_width=True)
 
 # ---- Tab 3: Images ---------------------------------------------------------
 with tab_images:
