@@ -170,7 +170,7 @@ with tab_images:
         cols = st.columns(4)
         for i, name in enumerate(existing):
             with cols[i % 4]:
-                st.image(str(IMAGE_DIR / name), caption=name, width='stretch')
+                st.image(str(IMAGE_DIR / name), caption=name, width=180)
     else:
         st.info("No images uploaded yet.")
 
