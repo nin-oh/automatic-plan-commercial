@@ -1,60 +1,102 @@
 # automatic-plan-commercial
 
-Streamlit app that generates a *plan commercial* PowerPoint deck (cover + one slide per product) from either an uploaded Excel file or a form filled directly in the UI.
+Two ways to build the Groupe Enosis *Plan Commercial Canal Gros* PowerPoint deck:
 
-Product slides mirror the layout of the reference MIO Canal Gros deck: Canal banner top-left, brand logo top-right, product name, two price tables (*Prix à l'unité* / *Prix à la caisse*), packshot on the wood background.
+- **CLI** — `generate_deck.py` turns the monthly `PL_Changes_*.xlsx` directly into a full `.pptx` (cover → category intros → brand intros → one slide per SKU → closing), pulling packshots from a folder on disk. Designed for automation.
+- **Streamlit app** — `app.py` gives a GUI with manual editing and a live slide preview. Good for one-off decks or when no Excel is available.
 
-## Run (easy mode)
+Both share the same layout: Canal Gros ribbon top-left, MIO logos at top-right and bottom-left, wood backdrop, product title, two price tables (*Prix à l'unité* / *Prix à la caisse*), centered packshot.
 
-One-time: install **Python 3.11+** from https://www.python.org/downloads/
-(on Windows, **tick "Add python.exe to PATH"** during setup).
+## CLI — the production path
 
-Then:
+```
+pip install python-pptx openpyxl Pillow
 
-- **Windows** — double-click `run.bat`
-- **macOS / Linux** — in a terminal: `./run.sh`
+python generate_deck.py \
+    --excel PL_Changes_260415_-_Gros.xlsx \
+    --assets ./assets \
+    --month "Avril 2026" \
+    --out ./output/Plan_commercial_Gros_Avril_2026.pptx
+```
 
-That's it. The script installs dependencies the first time and opens the app in your browser. To stop: close the window (or `Ctrl+C`).
+Quick tree preview of what's in the workbook (no .pptx written):
 
-To run it again later: just double-click `run.bat` (or `./run.sh`) again — subsequent launches are instant since dependencies are already installed.
+```
+python generate_deck.py --excel PL_Changes_260415_-_Gros.xlsx --tree
+```
 
-### Getting the code without Git
+### Excel schema
 
-On the GitHub page click **Code → Download ZIP**, extract it, then double-click `run.bat` inside the extracted folder. No `git` install needed.
+Sheet `ByFPC`, header on row 5, data from row 6:
 
-## Workflow
+| A | B | C | D | E | F | G | H | I | J | K | L | M | N |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Item Code | Item Description | SKU | Category | Brand | Change | _blank_ | Gros_BP_new | Promo_Txt_new | Gros_Net_new | _blank_ | Gros_BP_old | Promo_Txt_old | Gros_Net_old |
 
-1. **Deck** — set title, canal, mois. Optionally upload custom banner / background / cover photo (defaults extracted from the reference deck).
-2. **Content** — either:
-   - **Excel upload**: download the template, fill it, upload back.
-   - **Manual**: edit the products table in-place (add rows, fill prices, reference image filenames).
-3. **Images** — upload packshots / logos / optional product-name PNGs. Reference them by filename in the products table.
-4. **Generate** — click, preview the slide count, download the `.pptx`.
+Categories render in order: *Detergent Pdr Main*, *Detergent Pdr Matic*, *Detergent Liquide*, *Liquide Vaisselle*, *Pâte*, *Javel*. Unknown categories appear at the end.
 
-## Excel template
+### Assets folder
 
-Two sheets:
+```
+assets/
+├── stable/                             # loaded ONCE, embedded ONCE in the .pptx
+│   ├── header_ribbon_canal_gros.png    # TL red ribbon, 4.96 × 1.66 in
+│   ├── corner_tr_logo.png              # TR brand logo, 2.66 × 2.29 in
+│   ├── corner_bl_logo.png              # BL brand logo, 2.40 × 2.19 in
+│   ├── wood_backdrop.png               # bottom scene, 13.33 × 3.73 in
+│   └── red_underline.png               # title underline, 1.42 × 0.20 in
+├── categories/                         # one PNG per Category (spaces → '_')
+│   └── Detergent_Pdr_Main.png ...
+├── brands/                             # one PNG per Brand
+│   └── MIO.png  FIX.png  IRIS.png ...
+└── products/                           # one PNG per Item Code
+    ├── 80000150.png
+    └── ...
+```
+
+Missing packshot → falls back to `brands/<Brand>.png`, then skipped with a warning.
+
+### Price formatting
+
+- Moroccan style: space thousands separator, comma decimal, two decimals (`127,00`).
+- When new ≠ old: new in **bold red**, old below in gray with strikethrough.
+- `Promo_Txt` prints as a small italic caption under the net price.
+
+### Output size
+
+The reference deck was 175 MB because Office re-embedded each media item per slide. This generator caches every stable asset as a single `BytesIO` and reuses the stream — python-pptx content-hashes it and embeds once. A 140-product deck is typically under 20 MB.
+
+## Streamlit app — the GUI path
+
+```
+pip install -r requirements.txt
+streamlit run app.py
+# or double-click run.bat (Windows) / run.sh (macOS/Linux)
+```
+
+Four tabs: **Deck** (metadata, banner / background / cover overrides), **Content** (Excel upload *or* editable products table + live PNG preview of any slide), **Images** (pool of uploaded logos/packshots referenced by filename), **Generate** (slide count + download).
+
+The app uses a simpler, self-contained Excel template (`Meta` + `Produits` sheets) — see **"Excel template"** section below. It's decoupled from the CLI's `PL_Changes_*.xlsx` schema.
+
+### Streamlit Excel template
 
 - `Meta` — key/value: `titre`, `canal`, `mois`.
 - `Produits` — columns: `groupe`, `sous_groupe`, `nom`, `packshot`, `nom_image`, `prix_gros`, `prix_gros_net`, `colisage`, `colisage_prix_gros`, `colisage_prix_gros_net`, `logo_groupe`.
-
-Image columns hold filenames; matching images must be uploaded in the Images tab.
 
 ## Layout
 
 ```
 automatic-plan-commercial/
-├── app.py                              # Streamlit UI
+├── generate_deck.py          # CLI entrypoint
+├── excel_reader.py           # ByFPC parser, Product dataclass
+├── stable_layer.py           # cached stable branding
+├── product_layer.py          # title + price tables + packshot
+├── app.py                    # Streamlit UI
+├── run.bat / run.sh          # Streamlit one-click launchers
 ├── requirements.txt
-├── assets/builtin/                     # defaults extracted from sample
-│   ├── banner_canal_gros.png
-│   ├── mio_logo.png
-│   ├── label_prix_unite.png
-│   ├── label_prix_caisse.png
-│   └── wood_background.png
-├── samples/                            # reference deck(s)
-└── src/plan_commercial/
-    ├── model.py                        # Deck, Group, SubGroup, Product
-    ├── generator.py                    # build_pptx()
-    └── excel_io.py                     # read_excel, write_template
+├── assets/
+│   ├── stable/  categories/  brands/  products/
+│   └── builtin/              # legacy names kept for the Streamlit app
+├── samples/                  # reference .pptx (for asset extraction)
+└── src/plan_commercial/      # Streamlit generator / model / excel_io / preview
 ```
