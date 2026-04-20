@@ -10,12 +10,15 @@ import pandas as pd
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for excel_reader
 
 from plan_commercial import (  # noqa: E402
     Deck, Group, Product, SubGroup, build_pptx, read_excel, write_template,
     render_product, render_cover,
 )
 from plan_commercial.excel_io import PRODUIT_COLS  # noqa: E402
+import excel_reader as byfpc_reader  # noqa: E402
+import openpyxl  # noqa: E402
 
 st.set_page_config(page_title="Plan Commercial Generator", layout="wide")
 
@@ -103,32 +106,83 @@ with tab_content:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         with col_b:
-            xlsx = st.file_uploader("Upload filled Excel", type=["xlsx"], key="up_xlsx")
+            xlsx = st.file_uploader(
+                "Upload filled Excel (Meta/Produits template OR PL_Changes ByFPC)",
+                type=["xlsx"], key="up_xlsx",
+            )
             if xlsx is not None:
+                data = xlsx.getvalue()
                 try:
-                    deck = read_excel(xlsx.getvalue(), image_resolver=lambda n: n)
-                    rows = []
-                    for g in deck.groupes:
-                        for sg in g.sous_groupes:
-                            for p in sg.produits:
-                                rows.append({
-                                    "groupe": g.nom,
-                                    "sous_groupe": sg.nom,
-                                    "nom": p.nom,
-                                    "packshot": p.packshot_path or "",
-                                    "nom_image": p.nom_image_path or "",
-                                    "prix_gros": p.prix_gros,
-                                    "prix_gros_net": p.prix_gros_net,
-                                    "colisage": p.colisage,
-                                    "colisage_prix_gros": p.colisage_prix_gros,
-                                    "colisage_prix_gros_net": p.colisage_prix_gros_net,
-                                    "logo_groupe": g.logo_path or "",
-                                })
-                    ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
-                    ss.titre, ss.canal, ss.mois = deck.titre, deck.canal, deck.mois
-                    st.success(f"Loaded {len(rows)} products from Excel.")
+                    sheet_names = openpyxl.load_workbook(
+                        BytesIO(data), read_only=True
+                    ).sheetnames
                 except Exception as exc:
-                    st.error(f"Failed to read Excel: {exc}")
+                    st.error(f"Can't open file: {exc}")
+                    sheet_names = []
+
+                if "ByFPC" in sheet_names:
+                    # Real PL_Changes workbook
+                    try:
+                        tmp = Path(tempfile.gettempdir()) / "_uploaded.xlsx"
+                        tmp.write_bytes(data)
+                        products = byfpc_reader.read_byfpc(tmp)
+                        rows = [{
+                            "groupe": p.category or "Sans catégorie",
+                            "sous_groupe": p.brand or "Sans marque",
+                            "nom": p.description or p.sku or p.item_code,
+                            "packshot": f"{p.item_code}.png",
+                            "nom_image": "",
+                            "prix_gros": p.bp_new or 0.0,
+                            "prix_gros_net": p.net_new or 0.0,
+                            "colisage": "",
+                            "colisage_prix_gros": p.bp_new or 0.0,
+                            "colisage_prix_gros_net": p.net_new or 0.0,
+                            "logo_groupe": f"{p.brand}.png" if p.brand else "",
+                        } for p in products]
+                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+                        st.success(
+                            f"Loaded {len(rows)} products from ByFPC "
+                            f"({ss.products_df['groupe'].nunique()} categories, "
+                            f"{ss.products_df['sous_groupe'].nunique()} brands)."
+                        )
+                        st.info(
+                            "Packshot filenames are set to `<Item Code>.png` and brand "
+                            "logos to `<Brand>.png`. Upload matching images in the "
+                            "Images tab."
+                        )
+                    except Exception as exc:
+                        st.error(f"Failed to read ByFPC sheet: {exc}")
+                elif "Meta" in sheet_names and "Produits" in sheet_names:
+                    try:
+                        deck = read_excel(data, image_resolver=lambda n: n)
+                        rows = []
+                        for g in deck.groupes:
+                            for sg in g.sous_groupes:
+                                for p in sg.produits:
+                                    rows.append({
+                                        "groupe": g.nom,
+                                        "sous_groupe": sg.nom,
+                                        "nom": p.nom,
+                                        "packshot": p.packshot_path or "",
+                                        "nom_image": p.nom_image_path or "",
+                                        "prix_gros": p.prix_gros,
+                                        "prix_gros_net": p.prix_gros_net,
+                                        "colisage": p.colisage,
+                                        "colisage_prix_gros": p.colisage_prix_gros,
+                                        "colisage_prix_gros_net": p.colisage_prix_gros_net,
+                                        "logo_groupe": g.logo_path or "",
+                                    })
+                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+                        ss.titre, ss.canal, ss.mois = deck.titre, deck.canal, deck.mois
+                        st.success(f"Loaded {len(rows)} products from Meta/Produits template.")
+                    except Exception as exc:
+                        st.error(f"Failed to read template: {exc}")
+                elif sheet_names:
+                    st.error(
+                        f"Unrecognized workbook. Found sheets: {sheet_names}. "
+                        "Expected either `ByFPC` (PL_Changes) or `Meta`+`Produits` "
+                        "(app template)."
+                    )
 
     st.markdown("#### Products table")
     st.caption(
