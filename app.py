@@ -284,15 +284,19 @@ with tab_content:
                     ss.products_df.at[df.index[idx], "packshot"] = target_name
                     st.rerun()
 
-                # -- Brand logo (applies to all rows with same group name) --
-                brand = str(row.get("groupe") or "")
+                # -- Brand logo (propagates to every row sharing the brand) --
+                # Brand lives in `sous_groupe` for ByFPC imports, in `groupe`
+                # for the manual template — match whichever is non-empty.
+                groupe_val = str(row.get("groupe") or "").strip()
+                sous_val = str(row.get("sous_groupe") or "").strip()
+                brand = sous_val or groupe_val
                 logo_name = str(row.get("logo_groupe") or "").strip() \
                     or (f"{brand}_logo.png" if brand else f"row{idx+1}_logo.png")
-                st.markdown(f"**Brand logo** — _{brand or '(no group)'}_")
+                st.markdown(f"**Brand logo** — _{brand or '(no brand)'}_")
                 if group.logo_path:
                     st.image(group.logo_path, width=160)
                 up_logo = st.file_uploader(
-                    f"Drop logo for {brand or 'group'}",
+                    f"Drop logo for {brand or 'brand'}",
                     type=["png", "jpg", "jpeg"],
                     key=f"up_logo_{idx}",
                     label_visibility="collapsed",
@@ -302,12 +306,17 @@ with tab_content:
                     if not target_name.lower().endswith((".png", ".jpg", ".jpeg")):
                         target_name += Path(up_logo.name).suffix or ".png"
                     (IMAGE_DIR / target_name).write_bytes(up_logo.getbuffer())
-                    # Apply to every row sharing this group name
-                    if brand:
-                        mask = ss.products_df["groupe"] == brand
-                        ss.products_df.loc[mask, "logo_groupe"] = target_name
+                    # Apply to every row sharing the same brand (sous_groupe
+                    # primary, else groupe), regardless of category.
+                    cur = ss.products_df
+                    if sous_val:
+                        mask = cur["sous_groupe"].astype(str).str.strip() == sous_val
+                    elif groupe_val:
+                        mask = cur["groupe"].astype(str).str.strip() == groupe_val
                     else:
-                        ss.products_df.at[df.index[idx], "logo_groupe"] = target_name
+                        mask = cur.index == df.index[idx]
+                    ss.products_df.loc[mask, "logo_groupe"] = target_name
+                    st.toast(f"Logo applied to {int(mask.sum())} row(s).")
                     st.rerun()
 
 # ---- Tab 3: Images ---------------------------------------------------------
