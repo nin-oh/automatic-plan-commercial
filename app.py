@@ -263,6 +263,43 @@ with tab_content:
             )
             with preview_col:
                 st.image(render_product(deck, group, product), use_column_width=True)
+
+                # Inline price / colisage editors for this slide
+                with st.expander("Edit prices & colisage for this slide", expanded=True):
+                    row_idx = df.index[idx]
+                    pg = st.number_input(
+                        "Prix Gros (unité)",
+                        value=float(row.get("prix_gros") or 0),
+                        step=0.01, format="%.2f", key=f"ed_pg_{idx}",
+                    )
+                    pgn = st.number_input(
+                        "Prix Gros Net (unité)",
+                        value=float(row.get("prix_gros_net") or 0),
+                        step=0.01, format="%.2f", key=f"ed_pgn_{idx}",
+                    )
+                    colisage = st.text_input(
+                        "Colisage",
+                        value=str(row.get("colisage") or ""),
+                        placeholder="e.g. SAC de 16",
+                        key=f"ed_col_{idx}",
+                    )
+                    cpg = st.number_input(
+                        "Prix Gros (caisse)",
+                        value=float(row.get("colisage_prix_gros") or 0),
+                        step=0.01, format="%.2f", key=f"ed_cpg_{idx}",
+                    )
+                    cpgn = st.number_input(
+                        "Prix Gros Net (caisse)",
+                        value=float(row.get("colisage_prix_gros_net") or 0),
+                        step=0.01, format="%.2f", key=f"ed_cpgn_{idx}",
+                    )
+                    # Write back on every rerun (cheap)
+                    ss.products_df.at[row_idx, "prix_gros"] = pg
+                    ss.products_df.at[row_idx, "prix_gros_net"] = pgn
+                    ss.products_df.at[row_idx, "colisage"] = colisage
+                    ss.products_df.at[row_idx, "colisage_prix_gros"] = cpg
+                    ss.products_df.at[row_idx, "colisage_prix_gros_net"] = cpgn
+
             with upload_col:
                 # -- Packshot --
                 packshot_name = str(row.get("packshot") or "").strip() or f"row{idx+1}_packshot.png"
