@@ -203,8 +203,12 @@ with tab_content:
     )
     ss.products_df = edited
 
-    # ---- Live preview ----
-    st.markdown("#### Live preview")
+    # ---- Live preview + per-row drag-drop uploads ----
+    st.markdown("#### Preview + images")
+    st.caption(
+        "Pick a slide below. Drop a packshot / brand logo in the right column — "
+        "it saves to the pool and updates the preview immediately."
+    )
     df = ss.products_df
     if len(df) == 0:
         st.info("Add at least one product to see the preview.")
@@ -215,7 +219,7 @@ with tab_content:
             for i, (_, row) in enumerate(df.iterrows())
         ]
         labels = ["Cover"] + labels
-        choice = st.selectbox("Slide to preview", labels, index=min(1, len(labels) - 1))
+        choice = st.selectbox("Slide", labels, index=min(1, len(labels) - 1))
 
         deck = Deck(
             titre=ss.titre, canal=ss.canal, mois=ss.mois,
@@ -223,8 +227,23 @@ with tab_content:
             background_path=resolve_image(ss.background),
             cover_photo_path=resolve_image(ss.cover_photo),
         )
+
+        preview_col, upload_col = st.columns([3, 1])
+
         if choice == "Cover":
-            st.image(render_cover(deck), use_column_width=True)
+            with preview_col:
+                st.image(render_cover(deck), use_column_width=True)
+            with upload_col:
+                st.caption("Cover photo")
+                up = st.file_uploader(
+                    "Drop cover photo here",
+                    type=["png", "jpg", "jpeg"],
+                    key="up_cover_inline",
+                    label_visibility="collapsed",
+                )
+                if up is not None:
+                    ss.cover_photo = save_upload(up)
+                    st.rerun()
         else:
             idx = labels.index(choice) - 1
             row = df.iloc[idx]
@@ -242,7 +261,54 @@ with tab_content:
                 colisage_prix_gros=float(row.get("colisage_prix_gros") or 0),
                 colisage_prix_gros_net=float(row.get("colisage_prix_gros_net") or 0),
             )
-            st.image(render_product(deck, group, product), use_column_width=True)
+            with preview_col:
+                st.image(render_product(deck, group, product), use_column_width=True)
+            with upload_col:
+                # -- Packshot --
+                packshot_name = str(row.get("packshot") or "").strip() or f"row{idx+1}_packshot.png"
+                st.markdown("**Packshot**")
+                if product.packshot_path:
+                    st.image(product.packshot_path, width=160)
+                up_packshot = st.file_uploader(
+                    f"Drop packshot for #{idx+1}",
+                    type=["png", "jpg", "jpeg"],
+                    key=f"up_packshot_{idx}",
+                    label_visibility="collapsed",
+                )
+                if up_packshot is not None:
+                    # Save using the existing filename if set, else <row>_<original>
+                    target_name = packshot_name
+                    if not target_name.lower().endswith((".png", ".jpg", ".jpeg")):
+                        target_name += Path(up_packshot.name).suffix or ".png"
+                    (IMAGE_DIR / target_name).write_bytes(up_packshot.getbuffer())
+                    ss.products_df.at[df.index[idx], "packshot"] = target_name
+                    st.rerun()
+
+                # -- Brand logo (applies to all rows with same group name) --
+                brand = str(row.get("groupe") or "")
+                logo_name = str(row.get("logo_groupe") or "").strip() \
+                    or (f"{brand}_logo.png" if brand else f"row{idx+1}_logo.png")
+                st.markdown(f"**Brand logo** — _{brand or '(no group)'}_")
+                if group.logo_path:
+                    st.image(group.logo_path, width=160)
+                up_logo = st.file_uploader(
+                    f"Drop logo for {brand or 'group'}",
+                    type=["png", "jpg", "jpeg"],
+                    key=f"up_logo_{idx}",
+                    label_visibility="collapsed",
+                )
+                if up_logo is not None:
+                    target_name = logo_name
+                    if not target_name.lower().endswith((".png", ".jpg", ".jpeg")):
+                        target_name += Path(up_logo.name).suffix or ".png"
+                    (IMAGE_DIR / target_name).write_bytes(up_logo.getbuffer())
+                    # Apply to every row sharing this group name
+                    if brand:
+                        mask = ss.products_df["groupe"] == brand
+                        ss.products_df.loc[mask, "logo_groupe"] = target_name
+                    else:
+                        ss.products_df.at[df.index[idx], "logo_groupe"] = target_name
+                    st.rerun()
 
 # ---- Tab 3: Images ---------------------------------------------------------
 with tab_images:
