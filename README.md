@@ -27,11 +27,11 @@ python generate_deck.py --excel PL_Changes_260415_-_Gros.xlsx --tree
 
 ### Excel schema
 
-Sheet `ByFPC`, header on row 5, data from row 6:
+Sheet `BySKU`, header on row 5, data from row 6:
 
-| A | B | C | D | E | F | G | H | I | J | K | L | M | N |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Item Code | Item Description | SKU | Category | Brand | Change | _blank_ | Gros_BP_new | Promo_Txt_new | Gros_Net_new | _blank_ | Gros_BP_old | Promo_Txt_old | Gros_Net_old |
+| A | B | C | D | E | F | G | H | I | J | K | L |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| SKU | Category | Brand | Change | _blank_ | Gros_BP_new | Promo_Txt_new | Gros_Net_new | _blank_ | Gros_BP_old | Promo_Txt_old | Gros_Net_old |
 
 Categories render in order: *Detergent Pdr Main*, *Detergent Pdr Matic*, *Detergent Liquide*, *Liquide Vaisselle*, *Pâte*, *Javel*. Unknown categories appear at the end.
 
@@ -49,12 +49,12 @@ assets/
 │   └── Detergent_Pdr_Main.png ...
 ├── brands/                             # one PNG per Brand
 │   └── MIO.png  FIX.png  IRIS.png ...
-└── products/                           # one PNG per Item Code
-    ├── 80000150.png
+└── products/                           # one PNG per SKU
+    ├── MIO-PDR-10KG.png
     └── ...
 ```
 
-Missing packshot → falls back to `brands/<Brand>.png`, then skipped with a warning.
+Missing packshot (`products/<SKU>.png`) → falls back to `brands/<Brand>.png`, then skipped with a warning.
 
 ### Price formatting
 

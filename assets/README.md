@@ -17,8 +17,8 @@ Folder layout expected by `generate_deck.py`:
   `MIO.png`, `FIX.png`, `IRIS.png`, `MALA.png`, `ZEN.png`, `BANO.png`,
   `A+.png`, `QZI.png`.
 
-- `products/` — one PNG per Item Code (packshot). Filename = the exact
-  Item Code from the Excel. Example: `80000150.png`.
+- `products/` — one PNG per SKU (packshot). Filename = the exact SKU
+  string from the Excel BySKU sheet. Example: `MIO-PDR-10KG.png`.
 
 Missing packshots fall back to `brands/<Brand>.png`, then are skipped with a
 log warning.

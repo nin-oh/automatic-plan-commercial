@@ -19,7 +19,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
-from excel_reader import Product, grouped, read_byfpc
+from excel_reader import Product, grouped, read_bysku
 from product_layer import FONT, INK, RED, build_product_slide
 from stable_layer import StableAssets, apply_stable_layer
 
@@ -96,7 +96,7 @@ def build_closing(prs, assets: StableAssets):
 
 def generate(excel: Path, assets_dir: Path, month: str, out: Path,
              header_row: int = 5) -> int:
-    products = read_byfpc(excel, header_row=header_row)
+    products = read_bysku(excel, header_row=header_row)
     if not products:
         logger.error("no products found in %s", excel)
         return 1
@@ -150,7 +150,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path,
                     help="output .pptx path (required unless --tree)")
     ap.add_argument("--header-row", type=int, default=5,
-                    help="1-indexed header row in ByFPC (default 5)")
+                    help="1-indexed header row in BySKU (default 5)")
     ap.add_argument("--tree", action="store_true",
                     help="print the Category->Brand->SKU tree and exit")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -163,7 +163,7 @@ def main(argv=None) -> int:
 
     if args.tree:
         from excel_reader import print_tree
-        print_tree(read_byfpc(args.excel, header_row=args.header_row))
+        print_tree(read_bysku(args.excel, header_row=args.header_row))
         return 0
 
     if not args.month or not args.out:

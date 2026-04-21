@@ -70,7 +70,7 @@ def _f(v) -> Optional[float]:
 def read_byfpc(xlsx_path: str | Path, header_row: int = 5) -> List[Product]:
     """Load the ByFPC sheet into Product records.
 
-    Column indices match the spec:
+    Column indices:
       A Item Code | B Item Description | C SKU | D Category | E Brand | F Change |
       G blank | H Gros_BP_new | I Promo_Txt_new | J Gros_Net_new |
       K blank | L Gros_BP_old | M Promo_Txt_old | N Gros_Net_old
@@ -81,11 +81,10 @@ def read_byfpc(xlsx_path: str | Path, header_row: int = 5) -> List[Product]:
     ws = wb["ByFPC"]
     products: List[Product] = []
     for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
-        # Require at least 14 columns; pad if shorter
         r = list(row) + [None] * max(0, 14 - len(row))
         item_code = _s(r[0])
         if not item_code:
-            continue  # skip blanks
+            continue
         products.append(Product(
             item_code=item_code,
             description=_s(r[1]),
@@ -99,6 +98,45 @@ def read_byfpc(xlsx_path: str | Path, header_row: int = 5) -> List[Product]:
             bp_old=_f(r[11]),
             promo_old=_s(r[12]),
             net_old=_f(r[13]),
+        ))
+    return products
+
+
+def read_bysku(xlsx_path: str | Path, header_row: int = 5) -> List[Product]:
+    """Load the BySKU sheet (aggregated: one row per SKU).
+
+    Column indices:
+      A SKU | B Category | C Brand | D Change | E blank |
+      F Gros_BP_new | G Promo_Txt_new | H Gros_Net_new |
+      I blank | J Gros_BP_old | K Promo_Txt_old | L Gros_Net_old
+
+    Populates `item_code` = `sku` (same identifier, for packshot lookup).
+    `description` defaults to the SKU string since BySKU has no separate
+    description column.
+    """
+    wb = load_workbook(filename=str(xlsx_path), data_only=True, read_only=True)
+    if "BySKU" not in wb.sheetnames:
+        raise ValueError(f"Sheet 'BySKU' missing in {xlsx_path}")
+    ws = wb["BySKU"]
+    products: List[Product] = []
+    for row in ws.iter_rows(min_row=header_row + 1, values_only=True):
+        r = list(row) + [None] * max(0, 12 - len(row))
+        sku = _s(r[0])
+        if not sku:
+            continue
+        products.append(Product(
+            item_code=sku,
+            description=sku,
+            sku=sku,
+            category=_s(r[1]),
+            brand=_s(r[2]),
+            change=_s(r[3]),
+            bp_new=_f(r[5]),
+            promo_new=_s(r[6]),
+            net_new=_f(r[7]),
+            bp_old=_f(r[9]),
+            promo_old=_s(r[10]),
+            net_old=_f(r[11]),
         ))
     return products
 

@@ -107,7 +107,7 @@ with tab_content:
             )
         with col_b:
             xlsx = st.file_uploader(
-                "Upload filled Excel (Meta/Produits template OR PL_Changes ByFPC)",
+                "Upload filled Excel (Meta/Produits template OR PL_Changes BySKU)",
                 type=["xlsx"], key="up_xlsx",
             )
             if xlsx is not None:
@@ -120,17 +120,17 @@ with tab_content:
                     st.error(f"Can't open file: {exc}")
                     sheet_names = []
 
-                if "ByFPC" in sheet_names:
-                    # Real PL_Changes workbook
+                if "BySKU" in sheet_names:
+                    # PL_Changes workbook — use the aggregated BySKU sheet
                     try:
                         tmp = Path(tempfile.gettempdir()) / "_uploaded.xlsx"
                         tmp.write_bytes(data)
-                        products = byfpc_reader.read_byfpc(tmp)
+                        products = byfpc_reader.read_bysku(tmp)
                         rows = [{
                             "groupe": p.category or "Sans catégorie",
                             "sous_groupe": p.brand or "Sans marque",
-                            "nom": p.description or p.sku or p.item_code,
-                            "packshot": f"{p.item_code}.png",
+                            "nom": p.sku,
+                            "packshot": f"{p.sku}.png",
                             "nom_image": "",
                             "prix_gros": p.bp_new or 0.0,
                             "prix_gros_net": p.net_new or 0.0,
@@ -141,17 +141,17 @@ with tab_content:
                         } for p in products]
                         ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
                         st.success(
-                            f"Loaded {len(rows)} products from ByFPC "
+                            f"Loaded {len(rows)} SKUs from BySKU "
                             f"({ss.products_df['groupe'].nunique()} categories, "
                             f"{ss.products_df['sous_groupe'].nunique()} brands)."
                         )
                         st.info(
-                            "Packshot filenames are set to `<Item Code>.png` and brand "
-                            "logos to `<Brand>.png`. Upload matching images in the "
-                            "Images tab."
+                            "Packshot filenames are set to `<SKU>.png` and brand "
+                            "logos to `<Brand>.png`. Upload matching images via "
+                            "drag-and-drop under the preview."
                         )
                     except Exception as exc:
-                        st.error(f"Failed to read ByFPC sheet: {exc}")
+                        st.error(f"Failed to read BySKU sheet: {exc}")
                 elif "Meta" in sheet_names and "Produits" in sheet_names:
                     try:
                         deck = read_excel(data, image_resolver=lambda n: n)
@@ -180,7 +180,7 @@ with tab_content:
                 elif sheet_names:
                     st.error(
                         f"Unrecognized workbook. Found sheets: {sheet_names}. "
-                        "Expected either `ByFPC` (PL_Changes) or `Meta`+`Produits` "
+                        "Expected either `BySKU` (PL_Changes) or `Meta`+`Produits` "
                         "(app template)."
                     )
 
