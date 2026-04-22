@@ -232,7 +232,7 @@ with tab_content:
 
         if choice == "Cover":
             with preview_col:
-                st.image(render_cover(deck), use_column_width=True)
+                st.image(render_cover(deck), use_container_width=True)
             with upload_col:
                 st.caption("Cover photo")
                 up = st.file_uploader(
@@ -262,7 +262,7 @@ with tab_content:
                 colisage_prix_gros_net=float(row.get("colisage_prix_gros_net") or 0),
             )
             with preview_col:
-                st.image(render_product(deck, group, product), use_column_width=True)
+                st.image(render_product(deck, group, product), use_container_width=True)
 
                 # Inline price / colisage editors for this slide
                 with st.expander("Edit prices & colisage for this slide", expanded=True):
