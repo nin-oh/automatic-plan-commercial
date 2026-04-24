@@ -120,8 +120,8 @@ ss.setdefault("image_pool", [])     # list of filenames
 st.title("Plan Commercial — PPTX Generator")
 st.caption("Upload images, fill in product info (Excel or manual), generate the deck.")
 
-tab_home, tab_deck, tab_content, tab_images, tab_generate = st.tabs(
-    ["🏠 Home", "1. Deck", "2. Content", "3. Images", "4. Generate"]
+tab_home, tab_deck, tab_content, tab_brands, tab_images, tab_generate = st.tabs(
+    ["🏠 Home", "1. Deck", "2. Content", "3. Brands", "4. Images", "5. Generate"]
 )
 
 # ---- Tab 0: Home / Archive -------------------------------------------------
@@ -628,6 +628,158 @@ with tab_content:
                     ss.products_df.loc[mask, "logo_groupe"] = target_name
                     st.toast(f"Logo applied to {int(mask.sum())} row(s).")
                     st.rerun()
+
+# ---- Tab: Brands (bulk packshot workflow) ----------------------------------
+with tab_brands:
+    st.subheader("Travail par marque")
+    st.caption(
+        "Choisissez une marque, déposez plusieurs packshots d'un coup — "
+        "l'app les associe aux SKUs existants (par nom de fichier) ou crée "
+        "de nouvelles slides."
+    )
+
+    df_all = ss.products_df
+    if len(df_all) == 0:
+        st.info("Ajoutez ou chargez des produits dans l'onglet **2. Content** "
+                "pour pouvoir les regrouper par marque ici.")
+    else:
+        # Brands are sous_groupe (ByFPC mapping) — fall back to groupe.
+        brand_col = "sous_groupe" if df_all["sous_groupe"].astype(str).str.strip().any() else "groupe"
+        brand_counts = df_all[brand_col].value_counts()
+
+        # Brand picker as a selectbox + badges
+        brands = list(brand_counts.index)
+        sel_brand = st.selectbox(
+            "Marque",
+            brands,
+            format_func=lambda b: f"{b}  ({brand_counts[b]} SKUs)",
+        )
+
+        brand_mask = df_all[brand_col] == sel_brand
+        brand_df = df_all[brand_mask]
+
+        # Summary + brand logo uploader
+        c1, c2, c3 = st.columns([2, 2, 2])
+        n_with_pack = int(brand_df["packshot"].apply(
+            lambda v: resolve_image(v) is not None
+        ).sum())
+        c1.metric("Total SKUs", len(brand_df))
+        c2.metric("Avec packshot", n_with_pack)
+        c3.metric("Sans packshot", len(brand_df) - n_with_pack)
+
+        st.markdown("#### Logo de la marque")
+        col_a, col_b = st.columns([1, 3])
+        with col_a:
+            existing_logo = brand_df["logo_groupe"].dropna().astype(str).str.strip()
+            current_logo = next((resolve_image(v) for v in existing_logo if resolve_image(v)), None)
+            if current_logo:
+                st.image(current_logo, width=120)
+            else:
+                st.caption("_aucun_")
+        with col_b:
+            up_brand_logo = st.file_uploader(
+                f"Drop logo for {sel_brand}",
+                type=["png", "jpg", "jpeg"],
+                key=f"up_brand_logo_{sel_brand}",
+            )
+            if up_brand_logo is not None:
+                target = f"{_slug(sel_brand)}.png"
+                (IMAGE_DIR / target).write_bytes(up_brand_logo.getbuffer())
+                ss.products_df.loc[brand_mask, "logo_groupe"] = target
+                st.toast(f"Logo appliqué à {int(brand_mask.sum())} SKUs.")
+                st.rerun()
+
+        st.markdown("#### Dépôt en masse de packshots")
+        mode_bulk = st.radio(
+            "Mode",
+            ["Matcher par nom de fichier (ajoute l'image aux SKUs existants)",
+             "Créer une nouvelle slide pour chaque image déposée"],
+            horizontal=False,
+            key="bulk_mode",
+        )
+        bulk = st.file_uploader(
+            f"Glissez les packshots ici (plusieurs à la fois)",
+            type=["png", "jpg", "jpeg"],
+            accept_multiple_files=True,
+            key=f"bulk_packshots_{sel_brand}",
+        )
+        if bulk:
+            matched, missed, created = [], [], []
+            sku_values = brand_df["nom"].astype(str).tolist()
+            existing_packshots = brand_df["packshot"].astype(str).tolist()
+
+            for f in bulk:
+                fname = f.name
+                save_name = fname
+                (IMAGE_DIR / save_name).write_bytes(f.getbuffer())
+                stem = Path(fname).stem
+
+                if mode_bulk.startswith("Matcher"):
+                    # Match by exact packshot filename, then by SKU-in-stem.
+                    match_idx = None
+                    eq = brand_df["packshot"].astype(str) == fname
+                    if eq.any():
+                        match_idx = brand_df.index[eq.tolist().index(True)]
+                    else:
+                        for i, sku in zip(brand_df.index, sku_values):
+                            if sku and (sku.lower() in stem.lower()
+                                        or stem.lower() in sku.lower()):
+                                match_idx = i
+                                break
+                    if match_idx is not None:
+                        ss.products_df.at[match_idx, "packshot"] = save_name
+                        matched.append(fname)
+                    else:
+                        missed.append(fname)
+                else:
+                    # Create a new blank SKU row with the packshot set
+                    blank = {c: "" for c in PRODUIT_COLS}
+                    for c in ["prix_gros", "prix_gros_net",
+                              "colisage_prix_gros", "colisage_prix_gros_net",
+                              "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct"]:
+                        blank[c] = 0
+                    blank["is_promo"] = False
+                    blank["sous_groupe" if brand_col == "sous_groupe" else "groupe"] = sel_brand
+                    if brand_col == "sous_groupe":
+                        # Inherit any category from the brand's first row
+                        blank["groupe"] = brand_df.iloc[0]["groupe"] if len(brand_df) else ""
+                    blank["nom"] = stem
+                    blank["packshot"] = save_name
+                    ss.products_df = pd.concat(
+                        [ss.products_df, pd.DataFrame([blank], columns=PRODUIT_COLS)],
+                        ignore_index=True,
+                    )
+                    created.append(fname)
+
+            if matched:
+                st.success(f"Appliqué à {len(matched)} SKU(s) existant(s).")
+            if missed:
+                st.warning(
+                    f"{len(missed)} fichier(s) sans correspondance "
+                    f"(images enregistrées dans le pool): {', '.join(missed[:5])}"
+                    f"{'…' if len(missed) > 5 else ''}"
+                )
+            if created:
+                st.success(f"{len(created)} nouvelle(s) slide(s) créée(s).")
+            st.rerun()
+
+        # Brand SKU preview grid
+        st.markdown(f"#### SKUs — {sel_brand}")
+        cols = st.columns(4)
+        for i, (idx, row) in enumerate(brand_df.iterrows()):
+            with cols[i % 4]:
+                packshot = resolve_image(row.get("packshot"))
+                if packshot:
+                    st.image(packshot, caption=row["nom"], width=160)
+                else:
+                    st.markdown(f"**{row['nom']}**")
+                    st.caption("_pas de packshot_")
+                promo = " 🔥" if bool(row.get("is_promo")) else ""
+                st.caption(
+                    f"{row.get('groupe', '')}{promo} — "
+                    f"PG: {row.get('prix_gros', 0)}  Net: {row.get('prix_gros_net', 0)}"
+                )
+
 
 # ---- Tab 3: Images ---------------------------------------------------------
 with tab_images:
