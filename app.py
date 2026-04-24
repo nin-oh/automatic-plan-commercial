@@ -20,6 +20,7 @@ from plan_commercial.excel_io import PRODUIT_COLS  # noqa: E402
 from plan_commercial import generator as G  # noqa: E402
 import excel_reader as byfpc_reader  # noqa: E402
 import openpyxl  # noqa: E402
+import image_assets  # noqa: E402
 
 try:
     from streamlit_image_coordinates import streamlit_image_coordinates
@@ -132,12 +133,85 @@ tab_home, tab_deck, tab_content, tab_brands, tab_images, tab_generate = st.tabs(
 )
 
 # ---- Tab 0: Home / Archive -------------------------------------------------
+
+def _load_archived_xlsx_into_session(xlsx_path: Path) -> int:
+    """Load an archived plan's .xlsx back into session state. Returns row count."""
+    deck = read_excel(xlsx_path.read_bytes(), image_resolver=lambda n: n)
+    rows = []
+    for g in deck.groupes:
+        for sg in g.sous_groupes:
+            for p in sg.produits:
+                rows.append({
+                    "groupe": g.nom, "sous_groupe": sg.nom,
+                    "nom": p.nom,
+                    "packshot": p.packshot_path or "",
+                    "nom_image": p.nom_image_path or "",
+                    "prix_gros": p.prix_gros,
+                    "prix_gros_net": p.prix_gros_net,
+                    "colisage": p.colisage,
+                    "colisage_prix_gros": p.colisage_prix_gros,
+                    "colisage_prix_gros_net": p.colisage_prix_gros_net,
+                    "logo_groupe": g.logo_path or "",
+                    "is_promo": p.is_promo,
+                    "type_promo": p.type_promo,
+                    "promo_achat_qte": p.promo_achat_qte,
+                    "promo_gratuit_qte": p.promo_gratuit_qte,
+                    "promo_remise_pct": p.promo_remise_pct,
+                    "promo_texte": p.promo_texte,
+                    "packshot_left": p.packshot_left,
+                    "packshot_top": p.packshot_top,
+                    "packshot_width": p.packshot_width,
+                    "packshot_height": p.packshot_height,
+                })
+    ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+    ss.titre = deck.titre
+    ss.canal = deck.canal
+    ss.mois = deck.mois
+    return len(rows)
+
+
+def _deck_thumbnail(pptx_path: Path) -> bytes | None:
+    """Return a cached PNG thumbnail of the first product slide of an archived
+    deck; regenerate from the sidecar .xlsx on first access."""
+    thumb = pptx_path.with_suffix(".thumb.png")
+    if thumb.exists():
+        try:
+            return thumb.read_bytes()
+        except OSError:
+            pass
+    xlsx = pptx_path.with_suffix(".xlsx")
+    if not xlsx.exists():
+        return None
+    try:
+        deck = read_excel(xlsx.read_bytes(), image_resolver=resolve_image)
+        # Use the first actual product slide if available, else cover
+        first = next(deck.iter_products(), None)
+        if first:
+            g, _, p = first
+            png = render_product(deck, g, p)
+        else:
+            png = render_cover(deck)
+        # Shrink to ~400px wide for the thumbnail cache
+        from PIL import Image as _Im
+        from io import BytesIO as _B
+        im = _Im.open(_B(png))
+        ratio = 400 / im.width
+        im = im.resize((400, int(im.height * ratio)), _Im.LANCZOS)
+        buf = _B()
+        im.save(buf, format="PNG", optimize=True)
+        data = buf.getvalue()
+        thumb.write_bytes(data)
+        return data
+    except Exception:
+        return None
+
+
 with tab_home:
     st.subheader("Plans archivés par mois")
     st.caption(
-        "Chaque génération est sauvegardée automatiquement dans "
-        "`archive/<année-mois>/`. Téléchargez-la directement, ou chargez-la "
-        "pour l'éditer à nouveau."
+        "Chaque génération est sauvegardée dans `archive/<année-mois>/`. "
+        "Ouvrez un deck pour le télécharger, le dupliquer, le rééditer ou "
+        "le supprimer."
     )
 
     month_dirs = sorted(
@@ -146,67 +220,93 @@ with tab_home:
     )
     if not month_dirs:
         st.info("Aucun plan archivé pour le moment. Générez-en un dans l'onglet "
-                "**4. Generate** — il apparaîtra ici.")
+                "**5. Generate** — il apparaîtra ici.")
     else:
+        # Summary totals bar
+        total_decks = sum(len(list(m.glob("*.pptx"))) for m in month_dirs)
+        total_size = sum(p.stat().st_size for m in month_dirs for p in m.glob("*.pptx"))
+        st.caption(
+            f"**{total_decks} deck(s)** sur **{len(month_dirs)} mois** — "
+            f"**{total_size/1024/1024:.1f} MB**"
+        )
+
         for mdir in month_dirs:
             ppt_files = sorted(mdir.glob("*.pptx"), reverse=True)
             if not ppt_files:
                 continue
-            with st.expander(f"📅 {mdir.name} — {len(ppt_files)} deck(s)", expanded=True):
+            m_size = sum(p.stat().st_size for p in ppt_files)
+            with st.expander(
+                f"📅 {mdir.name} — {len(ppt_files)} deck(s), "
+                f"{m_size/1024/1024:.1f} MB",
+                expanded=True,
+            ):
                 for ppt in ppt_files:
                     xlsx = ppt.with_suffix(".xlsx")
-                    c1, c2, c3 = st.columns([4, 1, 1])
-                    c1.markdown(
+                    c_thumb, c_meta, c_btns = st.columns([1, 3, 2])
+
+                    # Thumbnail
+                    thumb = _deck_thumbnail(ppt)
+                    if thumb:
+                        c_thumb.image(thumb, use_container_width=True)
+                    else:
+                        c_thumb.caption("_pas d'aperçu_")
+
+                    c_meta.markdown(
                         f"**{ppt.stem}**  \n"
-                        f"_{ppt.stat().st_size/1024:.0f} KB_"
+                        f"_{ppt.stat().st_size/1024:.0f} KB_  \n"
+                        f"`{ppt.name}`"
                     )
-                    c2.download_button(
+
+                    # Actions: download / edit / duplicate / delete
+                    c_btns.download_button(
                         "⬇ .pptx",
                         data=ppt.read_bytes(),
                         file_name=ppt.name,
                         mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                         key=f"dl_pptx_{ppt.name}",
+                        use_container_width=True,
                     )
-                    if xlsx.exists() and c3.button("✏ Éditer", key=f"edit_{ppt.name}"):
-                        try:
-                            deck = read_excel(xlsx.read_bytes(),
-                                              image_resolver=lambda n: n)
-                            rows = []
-                            for g in deck.groupes:
-                                for sg in g.sous_groupes:
-                                    for p in sg.produits:
-                                        rows.append({
-                                            "groupe": g.nom, "sous_groupe": sg.nom,
-                                            "nom": p.nom,
-                                            "packshot": p.packshot_path or "",
-                                            "nom_image": p.nom_image_path or "",
-                                            "prix_gros": p.prix_gros,
-                                            "prix_gros_net": p.prix_gros_net,
-                                            "colisage": p.colisage,
-                                            "colisage_prix_gros": p.colisage_prix_gros,
-                                            "colisage_prix_gros_net": p.colisage_prix_gros_net,
-                                            "logo_groupe": g.logo_path or "",
-                                            "is_promo": p.is_promo,
-                                            "type_promo": p.type_promo,
-                                            "promo_achat_qte": p.promo_achat_qte,
-                                            "promo_gratuit_qte": p.promo_gratuit_qte,
-                                            "promo_remise_pct": p.promo_remise_pct,
-                                            "promo_texte": p.promo_texte,
-                                            "packshot_left": p.packshot_left,
-                                            "packshot_top": p.packshot_top,
-                                            "packshot_width": p.packshot_width,
-                                            "packshot_height": p.packshot_height,
-                                        })
-                            ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
-                            ss.titre = deck.titre
-                            ss.canal = deck.canal
-                            ss.mois = deck.mois
-                            st.success(
-                                f"Chargé {len(rows)} produits depuis {xlsx.name}. "
-                                "Ouvrez l'onglet **2. Content** pour éditer."
-                            )
-                        except Exception as exc:
-                            st.error(f"Échec du chargement: {exc}")
+                    if xlsx.exists():
+                        if c_btns.button("✏ Éditer", key=f"edit_{ppt.name}",
+                                          use_container_width=True):
+                            try:
+                                n = _load_archived_xlsx_into_session(xlsx)
+                                st.success(
+                                    f"Chargé {n} produits. Ouvrez l'onglet "
+                                    "**2. Content** pour éditer."
+                                )
+                            except Exception as exc:
+                                st.error(f"Échec du chargement: {exc}")
+                        if c_btns.button("📄 Dupliquer", key=f"dup_{ppt.name}",
+                                          use_container_width=True,
+                                          help="Charge comme nouveau plan "
+                                               "(réinitialise le mois à "
+                                               "aujourd'hui)"):
+                            try:
+                                n = _load_archived_xlsx_into_session(xlsx)
+                                from datetime import datetime as _dt
+                                ss.mois = _dt.now().strftime("%B %Y")
+                                st.success(
+                                    f"Dupliqué. {n} produits chargés, mois "
+                                    f"réinitialisé à « {ss.mois} »."
+                                )
+                            except Exception as exc:
+                                st.error(f"Échec de la duplication: {exc}")
+
+                    # Delete (require a confirmation checkbox)
+                    confirm = c_btns.checkbox(
+                        "Confirmer suppression",
+                        key=f"conf_del_{ppt.name}",
+                        value=False,
+                    )
+                    if c_btns.button("🗑 Supprimer", key=f"del_arch_{ppt.name}",
+                                      use_container_width=True,
+                                      disabled=not confirm):
+                        ppt.unlink(missing_ok=True)
+                        xlsx.unlink(missing_ok=True)
+                        ppt.with_suffix(".thumb.png").unlink(missing_ok=True)
+                        st.toast(f"Supprimé : {ppt.name}")
+                        st.rerun()
 
 # ---- Tab 1: Deck -----------------------------------------------------------
 with tab_deck:
@@ -652,6 +752,11 @@ with tab_content:
                     ss.products_df.at[row_idx, "promo_remise_pct"] = remise
                     ss.products_df.at[row_idx, "promo_texte"] = texte
 
+            # Brand context for the library picker filters
+            groupe_val = str(row.get("groupe") or "").strip()
+            sous_val = str(row.get("sous_groupe") or "").strip()
+            brand = sous_val or groupe_val
+
             with upload_col:
                 # -- Packshot --
                 packshot_name = str(row.get("packshot") or "").strip() or f"row{idx+1}_packshot.png"
@@ -665,20 +770,40 @@ with tab_content:
                     label_visibility="collapsed",
                 )
                 if up_packshot is not None:
-                    # Save using the existing filename if set, else <row>_<original>
                     target_name = packshot_name
                     if not target_name.lower().endswith((".png", ".jpg", ".jpeg")):
                         target_name += Path(up_packshot.name).suffix or ".png"
-                    (IMAGE_DIR / target_name).write_bytes(up_packshot.getbuffer())
+                    image_assets.register_upload(
+                        IMAGE_DIR, target_name,
+                        up_packshot.getbuffer(),
+                        brand=brand, type_="packshot",
+                    )
                     ss.products_df.at[df.index[idx], "packshot"] = target_name
                     st.rerun()
+
+                # Library picker for packshot
+                with st.expander(f"📚 Bibliothèque (packshots {brand or ''})", expanded=False):
+                    pack_candidates = image_assets.list_assets(
+                        IMAGE_DIR, brand=brand or None, type_="packshot"
+                    )
+                    if not pack_candidates:
+                        pack_candidates = image_assets.list_assets(
+                            IMAGE_DIR, type_="packshot"
+                        )
+                    if not pack_candidates:
+                        st.caption("_Aucun packshot dans la bibliothèque_")
+                    else:
+                        for m in pack_candidates[:20]:
+                            c_img, c_btn = st.columns([1, 2])
+                            c_img.image(str(IMAGE_DIR / m.filename), width=70)
+                            c_btn.caption(f"**{m.filename}**  \n_{m.brand or '?'}_")
+                            if c_btn.button("Utiliser", key=f"usep_{idx}_{m.filename}"):
+                                ss.products_df.at[df.index[idx], "packshot"] = m.filename
+                                st.rerun()
 
                 # -- Brand logo (propagates to every row sharing the brand) --
                 # Brand lives in `sous_groupe` for ByFPC imports, in `groupe`
                 # for the manual template — match whichever is non-empty.
-                groupe_val = str(row.get("groupe") or "").strip()
-                sous_val = str(row.get("sous_groupe") or "").strip()
-                brand = sous_val or groupe_val
                 logo_name = str(row.get("logo_groupe") or "").strip() \
                     or (f"{brand}_logo.png" if brand else f"row{idx+1}_logo.png")
                 st.markdown(f"**Brand logo** — _{brand or '(no brand)'}_")
@@ -694,7 +819,11 @@ with tab_content:
                     target_name = logo_name
                     if not target_name.lower().endswith((".png", ".jpg", ".jpeg")):
                         target_name += Path(up_logo.name).suffix or ".png"
-                    (IMAGE_DIR / target_name).write_bytes(up_logo.getbuffer())
+                    image_assets.register_upload(
+                        IMAGE_DIR, target_name,
+                        up_logo.getbuffer(),
+                        brand=brand, type_="logo",
+                    )
                     # Apply to every row sharing the same brand (sous_groupe
                     # primary, else groupe), regardless of category.
                     cur = ss.products_df
@@ -707,6 +836,35 @@ with tab_content:
                     ss.products_df.loc[mask, "logo_groupe"] = target_name
                     st.toast(f"Logo applied to {int(mask.sum())} row(s).")
                     st.rerun()
+
+                # Library picker for brand logo
+                with st.expander(f"📚 Bibliothèque (logos {brand or ''})", expanded=False):
+                    logo_candidates = image_assets.list_assets(
+                        IMAGE_DIR, brand=brand or None, type_="logo"
+                    )
+                    if not logo_candidates:
+                        logo_candidates = image_assets.list_assets(
+                            IMAGE_DIR, type_="logo"
+                        )
+                    if not logo_candidates:
+                        st.caption("_Aucun logo dans la bibliothèque_")
+                    else:
+                        for m in logo_candidates[:20]:
+                            c_img, c_btn = st.columns([1, 2])
+                            c_img.image(str(IMAGE_DIR / m.filename), width=70)
+                            c_btn.caption(f"**{m.filename}**  \n_{m.brand or '?'}_")
+                            if c_btn.button("Utiliser", key=f"usel_{idx}_{m.filename}"):
+                                cur = ss.products_df
+                                if sous_val:
+                                    mask = cur["sous_groupe"].astype(str).str.strip() == sous_val
+                                elif groupe_val:
+                                    mask = cur["groupe"].astype(str).str.strip() == groupe_val
+                                else:
+                                    mask = cur.index == df.index[idx]
+                                ss.products_df.loc[mask, "logo_groupe"] = m.filename
+                                st.toast(f"Logo « {m.filename} » appliqué à "
+                                         f"{int(mask.sum())} SKU(s).")
+                                st.rerun()
 
 # ---- Tab: Brands (bulk packshot workflow) ----------------------------------
 with tab_brands:
@@ -763,7 +921,10 @@ with tab_brands:
             )
             if up_brand_logo is not None:
                 target = f"{_slug(sel_brand)}.png"
-                (IMAGE_DIR / target).write_bytes(up_brand_logo.getbuffer())
+                image_assets.register_upload(
+                    IMAGE_DIR, target, up_brand_logo.getbuffer(),
+                    brand=sel_brand, type_="logo",
+                )
                 ss.products_df.loc[brand_mask, "logo_groupe"] = target
                 st.toast(f"Logo appliqué à {int(brand_mask.sum())} SKUs.")
                 st.rerun()
@@ -790,7 +951,10 @@ with tab_brands:
             for f in bulk:
                 fname = f.name
                 save_name = fname
-                (IMAGE_DIR / save_name).write_bytes(f.getbuffer())
+                image_assets.register_upload(
+                    IMAGE_DIR, save_name, f.getbuffer(),
+                    brand=sel_brand, type_="packshot",
+                )
                 stem = Path(fname).stem
 
                 if mode_bulk.startswith("Matcher"):
@@ -860,50 +1024,110 @@ with tab_brands:
                 )
 
 
-# ---- Tab 3: Images ---------------------------------------------------------
+# ---- Tab: Images (asset library) -------------------------------------------
 with tab_images:
-    st.subheader("Image pool (persistent)")
+    st.subheader("Bibliothèque d'images")
     st.caption(
-        f"Uploaded images are stored in `{IMAGE_DIR.relative_to(Path(__file__).resolve().parent)}` "
-        "and reused across app restarts. Reference them by filename in the "
-        "Products table, or drop them in place via the preview's drag zones."
+        "Déposez ici tous les packshots, logos et badges. Les images sont "
+        "sauvegardées de façon permanente et disponibles pour **n'importe "
+        "quel plan** (nouveau ou rechargé depuis l'archive). Utilisez-les via "
+        "le bouton « 📚 Bibliothèque » sur la slide d'édition, ou par nom de "
+        "fichier dans le tableau."
     )
+
+    # --- Mass upload ---
     ups = st.file_uploader(
-        "Upload images (drop many at once)",
-        type=["png", "jpg", "jpeg"],
-        accept_multiple_files=True, key="up_pool",
+        "📥 Glissez autant d'images que vous voulez",
+        type=list(image_assets.IMAGE_EXTS),
+        accept_multiple_files=True,
+        key="up_pool",
     )
     if ups:
-        for f in ups:
-            (IMAGE_DIR / f.name).write_bytes(f.getbuffer())
-        st.success(f"Saved {len(ups)} image(s).")
+        with st.spinner(f"Enregistrement de {len(ups)} image(s)..."):
+            for f in ups:
+                image_assets.register_upload(IMAGE_DIR, f.name, f.getbuffer())
+        st.success(
+            f"{len(ups)} image(s) ajoutée(s). Marque auto-détectée depuis "
+            "le nom de fichier (vous pouvez la corriger plus bas)."
+        )
 
-    existing = sorted(
-        [p for p in IMAGE_DIR.iterdir() if p.is_file()],
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
-    if existing:
-        total_kb = sum(p.stat().st_size for p in existing) / 1024
-        c1, c2 = st.columns([3, 1])
-        c1.markdown(f"**{len(existing)} image(s) — {total_kb:.0f} KB total**")
-        filt = c2.text_input("Filter", "", placeholder="e.g. MIO",
-                             label_visibility="collapsed")
-        if filt:
-            existing = [p for p in existing if filt.lower() in p.name.lower()]
-
-        cols = st.columns(4)
-        from datetime import datetime as _dt
-        for i, p in enumerate(existing):
-            with cols[i % 4]:
-                st.image(str(p), caption=p.name, width=180)
-                mtime = _dt.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
-                st.caption(f"↳ {mtime}")
-                if st.button(f"🗑", key=f"del_img_{p.name}", help="Delete"):
-                    p.unlink(missing_ok=True)
-                    st.rerun()
+    # --- Filters ---
+    assets = image_assets.load_metadata(IMAGE_DIR)
+    if not assets:
+        st.info("Aucune image pour le moment. Déposez-en ci-dessus.")
     else:
-        st.info("No images uploaded yet.")
+        total_kb = sum(m.size for m in assets.values()) / 1024
+        brand_counts = {}
+        for m in assets.values():
+            brand_counts[m.brand or "?"] = brand_counts.get(m.brand or "?", 0) + 1
+
+        c1, c2, c3, c4 = st.columns([2, 2, 2, 1])
+        c1.markdown(f"**{len(assets)} images — {total_kb:.0f} KB total**")
+        filt = c2.text_input("🔎 Recherche", "", placeholder="Nom, marque, tag")
+        brand_filter = c3.selectbox(
+            "Marque",
+            [""] + sorted(brand_counts.keys()),
+            format_func=lambda b: "Toutes" if not b else f"{b} ({brand_counts.get(b, 0)})",
+        )
+        type_filter = c4.selectbox(
+            "Type", ["", "packshot", "logo", "badge", "other"],
+            format_func=lambda t: "Tous" if not t else t,
+        )
+
+        filtered = image_assets.list_assets(
+            IMAGE_DIR,
+            brand=brand_filter or None,
+            type_=type_filter or None,
+            search=filt or None,
+        )
+
+        if not filtered:
+            st.warning("Aucune image ne correspond à ce filtre.")
+        else:
+            # Bulk actions bar
+            ba1, ba2 = st.columns([3, 1])
+            ba1.caption(f"{len(filtered)} image(s) filtrée(s).")
+            if ba2.button("🗑 Supprimer la sélection filtrée",
+                          disabled=not filtered,
+                          help="Supprime toutes les images correspondant aux filtres"):
+                for m in filtered:
+                    image_assets.delete_asset(IMAGE_DIR, m.filename)
+                st.rerun()
+
+            # Thumbnail grid
+            cols = st.columns(4)
+            for i, m in enumerate(filtered):
+                with cols[i % 4]:
+                    p = IMAGE_DIR / m.filename
+                    if p.exists():
+                        st.image(str(p), width=180)
+                    st.caption(m.filename)
+                    used = image_assets.count_usage(m.filename, ss.products_df)
+                    badge = f"{m.brand or '?'} · {m.type}"
+                    used_str = f" · utilisé dans **{used}** SKU(s)" if used else ""
+                    st.caption(f"{badge}{used_str}")
+
+                    # Inline edit: brand + type + delete
+                    with st.expander("Modifier"):
+                        new_brand = st.text_input(
+                            "Marque", m.brand, key=f"abrand_{m.filename}",
+                        )
+                        new_type = st.selectbox(
+                            "Type", ["packshot", "logo", "badge", "other"],
+                            index=["packshot", "logo", "badge", "other"].index(
+                                m.type if m.type in {"packshot", "logo", "badge", "other"} else "packshot"
+                            ),
+                            key=f"atype_{m.filename}",
+                        )
+                        if new_brand != m.brand or new_type != m.type:
+                            all_meta = image_assets.load_metadata(IMAGE_DIR)
+                            entry = all_meta[m.filename]
+                            entry.brand = new_brand.upper().strip()
+                            entry.type = new_type
+                            image_assets.save_metadata(IMAGE_DIR, all_meta)
+                        if st.button("🗑 Supprimer", key=f"del_{m.filename}"):
+                            image_assets.delete_asset(IMAGE_DIR, m.filename)
+                            st.rerun()
 
 # ---- Tab 4: Generate -------------------------------------------------------
 with tab_generate:
