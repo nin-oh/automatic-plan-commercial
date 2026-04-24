@@ -188,13 +188,64 @@ with tab_content:
                     )
 
     st.markdown("#### Products table")
-    st.caption(
-        "Add rows, edit values. `packshot`, `nom_image`, `logo_groupe` are filenames of "
-        "images uploaded in the Images tab."
+
+    # ---- Filters ----
+    with st.expander("Filtres & recherche", expanded=False):
+        col_s, col_b, col_c = st.columns([2, 2, 2])
+        search = col_s.text_input("Recherche (nom / marque / catégorie)", "")
+        brand_opts = sorted(
+            {str(v) for v in ss.products_df["sous_groupe"].dropna().unique()}
+        ) if len(ss.products_df) else []
+        cat_opts = sorted(
+            {str(v) for v in ss.products_df["groupe"].dropna().unique()}
+        ) if len(ss.products_df) else []
+        brand_filter = col_b.multiselect("Marque(s)", brand_opts)
+        cat_filter = col_c.multiselect("Catégorie(s)", cat_opts)
+        promo_only = st.checkbox("Afficher uniquement les promos", value=False)
+
+    # Build filter mask
+    df_full = ss.products_df
+    if len(df_full):
+        mask = pd.Series(True, index=df_full.index)
+        if search:
+            s = search.lower()
+            mask &= df_full.apply(
+                lambda r: s in str(r.get("nom") or "").lower()
+                       or s in str(r.get("sous_groupe") or "").lower()
+                       or s in str(r.get("groupe") or "").lower(),
+                axis=1,
+            )
+        if brand_filter:
+            mask &= df_full["sous_groupe"].astype(str).isin(brand_filter)
+        if cat_filter:
+            mask &= df_full["groupe"].astype(str).isin(cat_filter)
+        if promo_only:
+            mask &= df_full["is_promo"].astype(bool)
+        df_filtered = df_full[mask]
+    else:
+        df_filtered = df_full
+
+    # ---- Pagination ----
+    col_ps, col_pg, col_info = st.columns([1, 1, 3])
+    page_size = col_ps.selectbox(
+        "Lignes / page", [25, 50, 100, 200], index=0, key="page_size"
     )
+    n_pages = max(1, (len(df_filtered) + page_size - 1) // page_size)
+    page = col_pg.number_input(
+        f"Page (1-{n_pages})", min_value=1, max_value=n_pages, value=1, step=1,
+        key="page_num",
+    )
+    start = (page - 1) * page_size
+    end = start + page_size
+    df_page = df_filtered.iloc[start:end]
+    col_info.caption(
+        f"{len(df_filtered)} / {len(df_full)} produits — "
+        f"affichage {start + 1 if len(df_page) else 0}–{start + len(df_page)}"
+    )
+
     edited = st.data_editor(
-        ss.products_df,
-        num_rows="dynamic",
+        df_page,
+        num_rows="fixed",
         use_container_width=True,
         column_config={
             "prix_gros": st.column_config.NumberColumn(format="%.2f"),
@@ -210,9 +261,32 @@ with tab_content:
             "promo_gratuit_qte": st.column_config.NumberColumn("Gratuit (X)", format="%d"),
             "promo_remise_pct": st.column_config.NumberColumn("Remise %", format="%.1f"),
         },
-        key="products_editor",
+        key=f"products_editor_p{page}",
     )
-    ss.products_df = edited
+
+    # Write edits back to the full df (indices are preserved from the slice)
+    for idx in edited.index:
+        if idx in ss.products_df.index:
+            for col in edited.columns:
+                ss.products_df.at[idx, col] = edited.at[idx, col]
+
+    # Manual row-add (replaces dynamic rows which don't play well with paging)
+    col_add, col_del = st.columns([1, 1])
+    if col_add.button("➕ Ajouter un produit vide"):
+        blank = {c: "" for c in PRODUIT_COLS}
+        for c in ["prix_gros", "prix_gros_net",
+                  "colisage_prix_gros", "colisage_prix_gros_net",
+                  "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct"]:
+            blank[c] = 0
+        blank["is_promo"] = False
+        ss.products_df = pd.concat(
+            [ss.products_df, pd.DataFrame([blank], columns=PRODUIT_COLS)],
+            ignore_index=True,
+        )
+        st.rerun()
+    if col_del.button("🗑️ Tout effacer", type="secondary"):
+        ss.products_df = _blank_products_df()
+        st.rerun()
 
     # ---- Live preview + per-row drag-drop uploads ----
     st.markdown("#### Preview + images")
