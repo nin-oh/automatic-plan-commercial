@@ -19,6 +19,11 @@ class Product:
     promo_gratuit_qte: int = 0
     promo_remise_pct: float = 0.0
     promo_texte: str = ""
+    # Packshot position overrides (in inches). 0 = use default from layout.
+    packshot_left: float = 0.0
+    packshot_top: float = 0.0
+    packshot_width: float = 0.0
+    packshot_height: float = 0.0
 
 
 @dataclass

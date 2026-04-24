@@ -153,7 +153,13 @@ def render_product(deck: Deck, group: Optional[Group], product: Product) -> byte
     elif product.packshot_path:
         try:
             img = Image.open(product.packshot_path).convert("RGBA")
-            bx, by, bw, bh = _pos(G.PACKSHOT_POS)
+            # Use position/size overrides when set, else the default.
+            dl, dt, dw, dh = G.PACKSHOT_POS
+            left = product.packshot_left if product.packshot_left > 0 else dl
+            top = product.packshot_top if product.packshot_top > 0 else dt
+            w_in = product.packshot_width if product.packshot_width > 0 else dw
+            h_in = product.packshot_height if product.packshot_height > 0 else dh
+            bx, by, bw, bh = _pos((left, top, w_in, h_in))
             ratio = min(bw / img.width, bh / img.height)
             nw, nh = int(img.width * ratio), int(img.height * ratio)
             img = img.resize((nw, nh), Image.LANCZOS)

@@ -17,8 +17,15 @@ from plan_commercial import (  # noqa: E402
     render_product, render_cover, export_pdf,
 )
 from plan_commercial.excel_io import PRODUIT_COLS  # noqa: E402
+from plan_commercial import generator as G  # noqa: E402
 import excel_reader as byfpc_reader  # noqa: E402
 import openpyxl  # noqa: E402
+
+try:
+    from streamlit_image_coordinates import streamlit_image_coordinates
+    _HAS_CLICK = True
+except ImportError:
+    _HAS_CLICK = False
 
 st.set_page_config(page_title="Plan Commercial Generator", layout="wide")
 
@@ -185,6 +192,10 @@ with tab_home:
                                             "promo_gratuit_qte": p.promo_gratuit_qte,
                                             "promo_remise_pct": p.promo_remise_pct,
                                             "promo_texte": p.promo_texte,
+                                            "packshot_left": p.packshot_left,
+                                            "packshot_top": p.packshot_top,
+                                            "packshot_width": p.packshot_width,
+                                            "packshot_height": p.packshot_height,
                                         })
                             ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
                             ss.titre = deck.titre
@@ -274,6 +285,8 @@ with tab_content:
                             "is_promo": False, "type_promo": "",
                             "promo_achat_qte": 0, "promo_gratuit_qte": 0,
                             "promo_remise_pct": 0.0, "promo_texte": "",
+                            "packshot_left": 0.0, "packshot_top": 0.0,
+                            "packshot_width": 0.0, "packshot_height": 0.0,
                         } for p in products]
                         ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
                         st.success(
@@ -484,9 +497,53 @@ with tab_content:
                 promo_gratuit_qte=int(row.get("promo_gratuit_qte") or 0),
                 promo_remise_pct=float(row.get("promo_remise_pct") or 0),
                 promo_texte=str(row.get("promo_texte") or ""),
+                packshot_left=float(row.get("packshot_left") or 0),
+                packshot_top=float(row.get("packshot_top") or 0),
+                packshot_width=float(row.get("packshot_width") or 0),
+                packshot_height=float(row.get("packshot_height") or 0),
             )
             with preview_col:
-                st.image(render_product(deck, group, product), use_container_width=True)
+                preview_png = render_product(deck, group, product)
+                # Click-to-place: clicking on the preview sets the packshot's
+                # center to that point (feels like drag-and-drop).
+                if _HAS_CLICK and product.packshot_path and not product.is_promo:
+                    coords = streamlit_image_coordinates(
+                        preview_png,
+                        key=f"click_{idx}",
+                        use_column_width=True,
+                    )
+                    st.caption(
+                        "💡 Cliquez n'importe où sur l'image pour y déplacer "
+                        "le packshot (le centre suit votre clic)."
+                    )
+                    if coords is not None:
+                        # PNG is 1333×750 px (DPI 100). Map click to inches.
+                        # streamlit_image_coordinates returns a dict with the
+                        # displayed-size coords; normalise by the PNG's true size.
+                        # The component itself scales; 'x'/'y' are in the scaled
+                        # displayed image. Compute relative position then inches.
+                        from PIL import Image as _Im
+                        from io import BytesIO as _B
+                        im = _Im.open(_B(preview_png))
+                        iw, ih = im.size  # 1333x750
+                        x_norm = coords["x"] / coords.get("width", iw)
+                        y_norm = coords["y"] / coords.get("height", ih)
+                        cx_in = x_norm * 13.333
+                        cy_in = y_norm * 7.5
+                        # Figure out the current packshot box size
+                        dl, dt, dw, dh = G.PACKSHOT_POS
+                        w_in = product.packshot_width or dw
+                        h_in = product.packshot_height or dh
+                        new_left = max(0, min(13.333 - w_in, cx_in - w_in / 2))
+                        new_top = max(0, min(7.5 - h_in, cy_in - h_in / 2))
+                        prev_l = float(row.get("packshot_left") or 0)
+                        prev_t = float(row.get("packshot_top") or 0)
+                        if abs(new_left - prev_l) > 0.02 or abs(new_top - prev_t) > 0.02:
+                            ss.products_df.at[df.index[idx], "packshot_left"] = round(new_left, 2)
+                            ss.products_df.at[df.index[idx], "packshot_top"] = round(new_top, 2)
+                            st.rerun()
+                else:
+                    st.image(preview_png, use_container_width=True)
 
                 # Inline price / colisage editors for this slide
                 with st.expander("Edit prices & colisage for this slide", expanded=True):
@@ -523,6 +580,28 @@ with tab_content:
                     ss.products_df.at[row_idx, "colisage"] = colisage
                     ss.products_df.at[row_idx, "colisage_prix_gros"] = cpg
                     ss.products_df.at[row_idx, "colisage_prix_gros_net"] = cpgn
+
+                with st.expander("Position & taille du packshot", expanded=False):
+                    dl, dt, dw, dh = G.PACKSHOT_POS
+                    cur_w = float(row.get("packshot_width") or 0) or dw
+                    cur_h = float(row.get("packshot_height") or 0) or dh
+                    new_w = st.slider(
+                        "Largeur (in)", 0.5, 13.0, float(cur_w), step=0.1,
+                        key=f"ed_pw_{idx}",
+                    )
+                    new_h = st.slider(
+                        "Hauteur (in)", 0.5, 7.0, float(cur_h), step=0.1,
+                        key=f"ed_ph_{idx}",
+                    )
+                    if abs(new_w - cur_w) > 0.01:
+                        ss.products_df.at[row_idx, "packshot_width"] = round(new_w, 2)
+                    if abs(new_h - cur_h) > 0.01:
+                        ss.products_df.at[row_idx, "packshot_height"] = round(new_h, 2)
+                    if st.button("Réinitialiser la position", key=f"reset_pos_{idx}"):
+                        for c in ["packshot_left", "packshot_top",
+                                  "packshot_width", "packshot_height"]:
+                            ss.products_df.at[row_idx, c] = 0.0
+                        st.rerun()
 
                 with st.expander("Promo", expanded=bool(product.is_promo)):
                     is_promo = st.checkbox(
@@ -881,6 +960,10 @@ with tab_generate:
                 promo_gratuit_qte=int(row.get("promo_gratuit_qte") or 0),
                 promo_remise_pct=float(row.get("promo_remise_pct") or 0),
                 promo_texte=str(row.get("promo_texte") or ""),
+                packshot_left=float(row.get("packshot_left") or 0),
+                packshot_top=float(row.get("packshot_top") or 0),
+                packshot_width=float(row.get("packshot_width") or 0),
+                packshot_height=float(row.get("packshot_height") or 0),
             ))
 
         data = build_pptx(deck, with_subgroup_dividers=with_dividers)

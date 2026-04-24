@@ -160,7 +160,14 @@ def _add_product_slide(prs, deck: Deck, group: Group, product: Product):
     if product.is_promo:
         _add_promo(slide, product)
     elif product.packshot_path:
-        _add_pic(slide, product.packshot_path, PACKSHOT_POS)
+        dl, dt, dw, dh = PACKSHOT_POS
+        pos = (
+            product.packshot_left if product.packshot_left > 0 else dl,
+            product.packshot_top if product.packshot_top > 0 else dt,
+            product.packshot_width if product.packshot_width > 0 else dw,
+            product.packshot_height if product.packshot_height > 0 else dh,
+        )
+        _add_pic(slide, product.packshot_path, pos)
 
 
 # ---- Promo layout on the pptx slide ---------------------------------------
