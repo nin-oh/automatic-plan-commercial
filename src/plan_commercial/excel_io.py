@@ -12,6 +12,10 @@ PRODUIT_COLS = [
     "prix_gros", "prix_gros_net",
     "colisage", "colisage_prix_gros", "colisage_prix_gros_net",
     "logo_groupe",
+    # Promo fields
+    "is_promo", "type_promo",
+    "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct",
+    "promo_texte",
 ]
 
 
@@ -29,14 +33,21 @@ def write_template(output_path: Optional[str] = None) -> bytes:
             "prix_gros": 127.0, "prix_gros_net": 127.0,
             "colisage": "SAC", "colisage_prix_gros": 127.0, "colisage_prix_gros_net": 127.0,
             "logo_groupe": "mio_logo.png",
+            "is_promo": False, "type_promo": "",
+            "promo_achat_qte": 0, "promo_gratuit_qte": 0, "promo_remise_pct": 0.0,
+            "promo_texte": "",
         },
         {
-            "groupe": "MIO", "sous_groupe": "Poudre Main",
-            "nom": "Mio Poudre Main 5 Kg",
-            "packshot": "", "nom_image": "",
-            "prix_gros": 64.0, "prix_gros_net": 64.0,
-            "colisage": "SAC", "colisage_prix_gros": 64.0, "colisage_prix_gros_net": 64.0,
-            "logo_groupe": "",
+            "groupe": "IRIS", "sous_groupe": "Poudre Main",
+            "nom": "IRIS Poudre main 1 KG x12",
+            "packshot": "iris_1kg.png", "nom_image": "",
+            "prix_gros": 11.80, "prix_gros_net": 10.73,
+            "colisage": "SAC de 12",
+            "colisage_prix_gros": 141.6, "colisage_prix_gros_net": 128.73,
+            "logo_groupe": "iris_logo.png",
+            "is_promo": True, "type_promo": "gratuite",
+            "promo_achat_qte": 10, "promo_gratuit_qte": 1, "promo_remise_pct": 0.0,
+            "promo_texte": "",
         },
     ]
     produits_df = pd.DataFrame(example, columns=PRODUIT_COLS)
@@ -62,6 +73,15 @@ def _clean(v) -> str:
     if v is None or (isinstance(v, float) and pd.isna(v)):
         return ""
     return str(v).strip()
+
+
+def _bool(v) -> bool:
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return False
+    if isinstance(v, bool):
+        return v
+    s = str(v).strip().lower()
+    return s in {"1", "true", "vrai", "yes", "oui", "x"}
 
 
 def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] = None) -> Deck:
@@ -118,6 +138,12 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
             colisage=_clean(row.get("colisage")),
             colisage_prix_gros=_num(row.get("colisage_prix_gros")),
             colisage_prix_gros_net=_num(row.get("colisage_prix_gros_net")),
+            is_promo=_bool(row.get("is_promo")),
+            type_promo=_clean(row.get("type_promo")),
+            promo_achat_qte=int(_num(row.get("promo_achat_qte"))),
+            promo_gratuit_qte=int(_num(row.get("promo_gratuit_qte"))),
+            promo_remise_pct=_num(row.get("promo_remise_pct")),
+            promo_texte=_clean(row.get("promo_texte")),
         ))
 
     return deck

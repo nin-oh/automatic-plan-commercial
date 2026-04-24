@@ -147,8 +147,10 @@ def render_product(deck: Deck, group: Optional[Group], product: Product) -> byte
                 G._fmt(product.colisage_prix_gros_net)],
     )
 
-    # Packshot (scale preserving aspect, center in box)
-    if product.packshot_path:
+    # Packshot(s): single centered, or dual side-by-side for promo
+    if product.is_promo:
+        _render_promo(canvas, draw, product)
+    elif product.packshot_path:
         try:
             img = Image.open(product.packshot_path).convert("RGBA")
             bx, by, bw, bh = _pos(G.PACKSHOT_POS)
@@ -162,6 +164,120 @@ def render_product(deck: Deck, group: Optional[Group], product: Product) -> byte
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
+# ---- Promo layout ---------------------------------------------------------
+# Left packshot / text, arrow, right packshot / text.
+PROMO_LEFT_PACK   = (1.20, 3.55, 2.80, 3.90)
+PROMO_RIGHT_PACK  = (8.80, 3.55, 2.80, 3.90)
+PROMO_LEFT_TEXT   = (0.60, 4.70, 3.40, 0.55)
+PROMO_RIGHT_TEXT  = (7.60, 4.70, 3.80, 0.55)
+PROMO_ARROW       = (5.40, 4.60, 2.30, 0.70)
+PROMO_BADGE       = (7.60, 0.20, 1.80, 1.70)  # "OFFRE BOMBE" if available
+
+
+def _paste_scaled(canvas, path, pos):
+    """Paste preserving aspect ratio, centered within the box."""
+    try:
+        img = Image.open(path).convert("RGBA")
+    except (OSError, FileNotFoundError):
+        return
+    bx, by, bw, bh = _pos(pos)
+    ratio = min(bw / img.width, bh / img.height)
+    nw, nh = max(1, int(img.width * ratio)), max(1, int(img.height * ratio))
+    img = img.resize((nw, nh), Image.LANCZOS)
+    canvas.paste(img, (bx + (bw - nw) // 2, by + (bh - nh) // 2), img)
+
+
+def _promo_texts(product):
+    """Return (left_text, right_text) strings for the selected promo type."""
+    if product.promo_texte:
+        # User override: display the free text on the right as-is
+        return (f"Pour {product.promo_achat_qte} caisses"
+                if product.promo_achat_qte else "",
+                product.promo_texte)
+    n = product.promo_achat_qte or 0
+    x = product.promo_gratuit_qte or 0
+    pct = product.promo_remise_pct or 0
+    left = f"Pour {n} caisses" if n else ""
+    t = (product.type_promo or "").strip().lower()
+    if t == "gratuite":
+        right = f"{x} caisse{'s' if x > 1 else ''} Gratuite{'s' if x > 1 else ''}"
+    elif t == "remise":
+        right = f"-{_pct_fmt(pct)}% de remise"
+    elif t in {"remise+gratuite", "gratuite+remise"}:
+        right = (f"{x} caisse{'s' if x > 1 else ''} Gratuite{'s' if x > 1 else ''}"
+                 f" + -{_pct_fmt(pct)}%")
+    else:
+        right = ""
+    return left, right
+
+
+def _pct_fmt(v):
+    if v is None:
+        return "0"
+    if float(v) == int(v):
+        return str(int(v))
+    return f"{float(v):.1f}".replace(".", ",")
+
+
+def _draw_dual_color_text(draw, pos, text, *, accent_word_idx=1,
+                          base_fill=(30, 30, 80), accent_fill=(232, 23, 46),
+                          size=36, bold=True):
+    """Draw text where one 'word' is in accent color (e.g. the number)."""
+    if not text:
+        return
+    x, y, w, h = _pos(pos)
+    font = _font(size, bold=bold)
+    words = text.split()
+    # Measure pieces
+    sep = font.getlength(" ") if hasattr(font, "getlength") else 6
+    widths = [font.getlength(w2) if hasattr(font, "getlength")
+              else draw.textlength(w2, font=font) for w2 in words]
+    total = sum(widths) + sep * max(0, len(words) - 1)
+    # Vertically center (approximate ascent/descent via bbox)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    th = bbox[3] - bbox[1]
+    cursor_x = x + (w - total) / 2
+    ty = y + (h - th) / 2 - bbox[1]
+    for i, w2 in enumerate(words):
+        fill = accent_fill if i == accent_word_idx else base_fill
+        draw.text((cursor_x, ty), w2, font=font, fill=fill)
+        cursor_x += widths[i] + sep
+
+
+def _render_promo(canvas, draw, product):
+    """Compose the promo packshots + arrow + texts + badge."""
+    # Optional OFFRE BOMBE badge (from built-in or user-provided asset)
+    from pathlib import Path as _P
+    bomb_path = _P(G._asset("offre_bombe.png"))
+    if bomb_path.exists():
+        _paste_scaled(canvas, str(bomb_path), PROMO_BADGE)
+
+    # Left and right packshots (same image)
+    if product.packshot_path:
+        _paste_scaled(canvas, product.packshot_path, PROMO_LEFT_PACK)
+        _paste_scaled(canvas, product.packshot_path, PROMO_RIGHT_PACK)
+        # Decorative bow for "gratuite" / "remise+gratuite"
+        t = (product.type_promo or "").strip().lower()
+        if "gratuite" in t:
+            bow_path = _P(G._asset("bow_overlay.png"))
+            if bow_path.exists():
+                _paste_scaled(canvas, str(bow_path),
+                              (PROMO_RIGHT_PACK[0] + 1.2,
+                               PROMO_RIGHT_PACK[1] - 0.1,
+                               1.4, 1.2))
+
+    # Red arrow in the middle
+    _text_center(draw, PROMO_ARROW, "→",  # →
+                 size=110, bold=True, fill=(232, 23, 46))
+
+    # Texts: "Pour N caisses"  /  "X caisse Gratuite" (or variant)
+    left_txt, right_txt = _promo_texts(product)
+    _draw_dual_color_text(draw, PROMO_LEFT_TEXT, left_txt,
+                          accent_word_idx=1, size=34)
+    _draw_dual_color_text(draw, PROMO_RIGHT_TEXT, right_txt,
+                          accent_word_idx=0, size=34)
 
 
 def render_cover(deck: Deck) -> bytes:

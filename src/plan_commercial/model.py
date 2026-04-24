@@ -12,6 +12,13 @@ class Product:
     colisage: str = ""
     colisage_prix_gros: float = 0.0
     colisage_prix_gros_net: float = 0.0
+    # Promo (optional)
+    is_promo: bool = False
+    type_promo: str = ""          # "gratuite" | "remise" | "remise+gratuite"
+    promo_achat_qte: int = 0
+    promo_gratuit_qte: int = 0
+    promo_remise_pct: float = 0.0
+    promo_texte: str = ""
 
 
 @dataclass

@@ -157,8 +157,97 @@ def _add_product_slide(prs, deck: Deck, group: Group, product: Product):
     _unite_table(slide, product)
     _caisse_table(slide, product)
 
-    if product.packshot_path:
+    if product.is_promo:
+        _add_promo(slide, product)
+    elif product.packshot_path:
         _add_pic(slide, product.packshot_path, PACKSHOT_POS)
+
+
+# ---- Promo layout on the pptx slide ---------------------------------------
+PROMO_LEFT_PACK  = (1.20, 3.55, 2.80, 3.90)
+PROMO_RIGHT_PACK = (8.80, 3.55, 2.80, 3.90)
+PROMO_LEFT_TEXT  = (0.60, 4.70, 3.40, 0.55)
+PROMO_RIGHT_TEXT = (7.60, 4.70, 3.80, 0.55)
+PROMO_ARROW      = (5.40, 4.60, 2.30, 0.70)
+PROMO_BADGE      = (7.60, 0.20, 1.80, 1.70)
+
+
+def _pct(v):
+    if v is None:
+        return "0"
+    if float(v) == int(v):
+        return str(int(v))
+    return f"{float(v):.1f}".replace(".", ",")
+
+
+def _promo_texts(product):
+    if product.promo_texte:
+        left = f"Pour {product.promo_achat_qte} caisses" if product.promo_achat_qte else ""
+        return left, product.promo_texte
+    n = product.promo_achat_qte or 0
+    x = product.promo_gratuit_qte or 0
+    p = product.promo_remise_pct or 0
+    left = f"Pour {n} caisses" if n else ""
+    t = (product.type_promo or "").strip().lower()
+    if t == "gratuite":
+        right = f"{x} caisse{'s' if x > 1 else ''} Gratuite{'s' if x > 1 else ''}"
+    elif t == "remise":
+        right = f"-{_pct(p)}% de remise"
+    elif t in {"remise+gratuite", "gratuite+remise"}:
+        right = (f"{x} caisse{'s' if x > 1 else ''} Gratuite{'s' if x > 1 else ''}"
+                 f" + -{_pct(p)}%")
+    else:
+        right = ""
+    return left, right
+
+
+def _add_promo_text(slide, pos, text, accent_idx=1):
+    """Text with one word (default: second) in red; rest in dark blue."""
+    l, t, w, h = pos
+    tb = slide.shapes.add_textbox(Inches(l), Inches(t), Inches(w), Inches(h))
+    tf = tb.text_frame
+    tf.margin_left = tf.margin_right = Emu(0)
+    tf.margin_top = tf.margin_bottom = Emu(0)
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    p = tf.paragraphs[0]
+    p.alignment = PP_ALIGN.CENTER
+    words = text.split()
+    dark_blue = RGBColor(0x1E, 0x1E, 0x50)
+    for i, w2 in enumerate(words):
+        run = p.add_run()
+        run.text = w2 + (" " if i < len(words) - 1 else "")
+        run.font.size = Pt(28)
+        run.font.bold = True
+        run.font.color.rgb = RED if i == accent_idx else dark_blue
+
+
+def _add_promo(slide, product):
+    # Optional OFFRE BOMBE badge (if user placed offre_bombe.png in assets/builtin/)
+    bomb = ASSETS / "offre_bombe.png"
+    if bomb.exists():
+        _add_pic(slide, str(bomb), PROMO_BADGE)
+
+    # Two packshots (left + right, same image)
+    if product.packshot_path:
+        _add_pic(slide, product.packshot_path, PROMO_LEFT_PACK)
+        _add_pic(slide, product.packshot_path, PROMO_RIGHT_PACK)
+        # Decorative bow on right (gratuite / remise+gratuite)
+        t = (product.type_promo or "").strip().lower()
+        if "gratuite" in t:
+            bow = ASSETS / "bow_overlay.png"
+            if bow.exists():
+                _add_pic(slide, str(bow),
+                         (PROMO_RIGHT_PACK[0] + 1.2,
+                          PROMO_RIGHT_PACK[1] - 0.1, 1.4, 1.2))
+
+    # Red arrow in the middle
+    _add_text(slide, PROMO_ARROW, "→",
+              size=72, bold=True, color=RED)
+
+    # Two promo texts
+    left_txt, right_txt = _promo_texts(product)
+    _add_promo_text(slide, PROMO_LEFT_TEXT, left_txt, accent_idx=1)
+    _add_promo_text(slide, PROMO_RIGHT_TEXT, right_txt, accent_idx=0)
 
 
 def build_pptx(deck: Deck, output_path: Optional[str] = None,

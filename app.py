@@ -138,6 +138,9 @@ with tab_content:
                             "colisage_prix_gros": p.bp_new or 0.0,
                             "colisage_prix_gros_net": p.net_new or 0.0,
                             "logo_groupe": f"{p.brand}.png" if p.brand else "",
+                            "is_promo": False, "type_promo": "",
+                            "promo_achat_qte": 0, "promo_gratuit_qte": 0,
+                            "promo_remise_pct": 0.0, "promo_texte": "",
                         } for p in products]
                         ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
                         st.success(
@@ -198,6 +201,14 @@ with tab_content:
             "prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
             "colisage_prix_gros": st.column_config.NumberColumn(format="%.2f"),
             "colisage_prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
+            "is_promo": st.column_config.CheckboxColumn("Promo ?"),
+            "type_promo": st.column_config.SelectboxColumn(
+                "Type promo",
+                options=["", "gratuite", "remise", "remise+gratuite"],
+            ),
+            "promo_achat_qte": st.column_config.NumberColumn("Achat (N)", format="%d"),
+            "promo_gratuit_qte": st.column_config.NumberColumn("Gratuit (X)", format="%d"),
+            "promo_remise_pct": st.column_config.NumberColumn("Remise %", format="%.1f"),
         },
         key="products_editor",
     )
@@ -260,6 +271,12 @@ with tab_content:
                 colisage=str(row.get("colisage") or ""),
                 colisage_prix_gros=float(row.get("colisage_prix_gros") or 0),
                 colisage_prix_gros_net=float(row.get("colisage_prix_gros_net") or 0),
+                is_promo=bool(row.get("is_promo") or False),
+                type_promo=str(row.get("type_promo") or ""),
+                promo_achat_qte=int(row.get("promo_achat_qte") or 0),
+                promo_gratuit_qte=int(row.get("promo_gratuit_qte") or 0),
+                promo_remise_pct=float(row.get("promo_remise_pct") or 0),
+                promo_texte=str(row.get("promo_texte") or ""),
             )
             with preview_col:
                 st.image(render_product(deck, group, product), use_container_width=True)
@@ -299,6 +316,55 @@ with tab_content:
                     ss.products_df.at[row_idx, "colisage"] = colisage
                     ss.products_df.at[row_idx, "colisage_prix_gros"] = cpg
                     ss.products_df.at[row_idx, "colisage_prix_gros_net"] = cpgn
+
+                with st.expander("Promo", expanded=bool(product.is_promo)):
+                    is_promo = st.checkbox(
+                        "Cette slide est une promo",
+                        value=bool(product.is_promo),
+                        key=f"ed_ispromo_{idx}",
+                    )
+                    type_options = ["gratuite", "remise", "remise+gratuite"]
+                    t_default = product.type_promo if product.type_promo in type_options else "gratuite"
+                    type_promo = st.selectbox(
+                        "Type de promo",
+                        type_options,
+                        index=type_options.index(t_default),
+                        disabled=not is_promo,
+                        key=f"ed_typepromo_{idx}",
+                    )
+                    achat = st.number_input(
+                        "Acheter N caisses",
+                        min_value=0, step=1,
+                        value=int(product.promo_achat_qte),
+                        disabled=not is_promo,
+                        key=f"ed_achat_{idx}",
+                    )
+                    grat = st.number_input(
+                        "X caisses gratuites",
+                        min_value=0, step=1,
+                        value=int(product.promo_gratuit_qte),
+                        disabled=not is_promo or type_promo == "remise",
+                        key=f"ed_grat_{idx}",
+                    )
+                    remise = st.number_input(
+                        "Remise (%)",
+                        min_value=0.0, step=0.5, format="%.1f",
+                        value=float(product.promo_remise_pct),
+                        disabled=not is_promo or type_promo == "gratuite",
+                        key=f"ed_remise_{idx}",
+                    )
+                    texte = st.text_input(
+                        "Texte personnalisé (optionnel, remplace le texte auto)",
+                        value=product.promo_texte,
+                        disabled=not is_promo,
+                        key=f"ed_texte_{idx}",
+                    )
+                    ss.products_df.at[row_idx, "is_promo"] = is_promo
+                    ss.products_df.at[row_idx, "type_promo"] = type_promo if is_promo else ""
+                    ss.products_df.at[row_idx, "promo_achat_qte"] = achat
+                    ss.products_df.at[row_idx, "promo_gratuit_qte"] = grat
+                    ss.products_df.at[row_idx, "promo_remise_pct"] = remise
+                    ss.products_df.at[row_idx, "promo_texte"] = texte
 
             with upload_col:
                 # -- Packshot --
@@ -431,6 +497,12 @@ with tab_generate:
                 colisage=str(row.get("colisage") or "").strip(),
                 colisage_prix_gros=float(row.get("colisage_prix_gros") or 0),
                 colisage_prix_gros_net=float(row.get("colisage_prix_gros_net") or 0),
+                is_promo=bool(row.get("is_promo") or False),
+                type_promo=str(row.get("type_promo") or ""),
+                promo_achat_qte=int(row.get("promo_achat_qte") or 0),
+                promo_gratuit_qte=int(row.get("promo_gratuit_qte") or 0),
+                promo_remise_pct=float(row.get("promo_remise_pct") or 0),
+                promo_texte=str(row.get("promo_texte") or ""),
             ))
 
         data = build_pptx(deck, with_subgroup_dividers=with_dividers)
