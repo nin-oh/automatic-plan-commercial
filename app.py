@@ -25,6 +25,64 @@ st.set_page_config(page_title="Plan Commercial Generator", layout="wide")
 IMAGE_DIR = Path(tempfile.gettempdir()) / "plan_commercial_images"
 IMAGE_DIR.mkdir(exist_ok=True)
 
+# Archive directory (project-root-relative so users find it easily)
+ARCHIVE_DIR = Path(__file__).resolve().parent / "archive"
+ARCHIVE_DIR.mkdir(exist_ok=True)
+
+_FR_MONTHS = {
+    "janvier": 1, "février": 2, "fevrier": 2, "mars": 3, "avril": 4,
+    "mai": 5, "juin": 6, "juillet": 7, "août": 8, "aout": 8,
+    "septembre": 9, "octobre": 10, "novembre": 11,
+    "décembre": 12, "decembre": 12,
+}
+
+
+def archive_month(mois: str) -> str:
+    """Return the YYYY-MM folder name for a mois string like 'Avril 2026'.
+    Falls back to the current system YYYY-MM if parsing fails.
+    """
+    from datetime import datetime
+    parts = (mois or "").lower().split()
+    month = next((_FR_MONTHS[p] for p in parts if p in _FR_MONTHS), None)
+    year = next((int(p) for p in parts if p.isdigit() and len(p) == 4), None)
+    if month and year:
+        return f"{year}-{month:02d}"
+    return datetime.now().strftime("%Y-%m")
+
+
+def _slug(s: str) -> str:
+    keep = [c if c.isalnum() else "_" for c in (s or "").strip()]
+    return "".join(keep).strip("_") or "plan"
+
+
+def archive_deck(pptx_bytes: bytes, products_df, meta: dict, mois: str) -> Path:
+    """Save pptx + a snapshot xlsx into archive/<YYYY-MM>/. Returns .pptx path."""
+    from datetime import datetime
+    folder = ARCHIVE_DIR / archive_month(mois)
+    folder.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stem = f"{_slug(meta.get('titre', 'Plan_Commercial'))}_" \
+           f"{_slug(meta.get('canal', 'Canal_Gros'))}_" \
+           f"{_slug(mois)}_{ts}"
+    pptx_path = folder / f"{stem}.pptx"
+    xlsx_path = folder / f"{stem}.xlsx"
+    pptx_path.write_bytes(pptx_bytes)
+
+    # Snapshot xlsx (Meta + Produits, same schema as the template)
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws_meta = wb.active
+    ws_meta.title = "Meta"
+    ws_meta.append(["cle", "valeur"])
+    for k, v in meta.items():
+        ws_meta.append([k, v])
+    ws_p = wb.create_sheet("Produits")
+    ws_p.append(PRODUIT_COLS)
+    for _, row in products_df.iterrows():
+        ws_p.append([row.get(c) for c in PRODUIT_COLS])
+    wb.save(xlsx_path)
+    return pptx_path
+
 
 def resolve_image(name: str) -> str | None:
     if not name:
@@ -60,9 +118,82 @@ ss.setdefault("image_pool", [])     # list of filenames
 st.title("Plan Commercial — PPTX Generator")
 st.caption("Upload images, fill in product info (Excel or manual), generate the deck.")
 
-tab_deck, tab_content, tab_images, tab_generate = st.tabs(
-    ["1. Deck", "2. Content", "3. Images", "4. Generate"]
+tab_home, tab_deck, tab_content, tab_images, tab_generate = st.tabs(
+    ["🏠 Home", "1. Deck", "2. Content", "3. Images", "4. Generate"]
 )
+
+# ---- Tab 0: Home / Archive -------------------------------------------------
+with tab_home:
+    st.subheader("Plans archivés par mois")
+    st.caption(
+        "Chaque génération est sauvegardée automatiquement dans "
+        "`archive/<année-mois>/`. Téléchargez-la directement, ou chargez-la "
+        "pour l'éditer à nouveau."
+    )
+
+    month_dirs = sorted(
+        [p for p in ARCHIVE_DIR.iterdir() if p.is_dir()],
+        reverse=True,
+    )
+    if not month_dirs:
+        st.info("Aucun plan archivé pour le moment. Générez-en un dans l'onglet "
+                "**4. Generate** — il apparaîtra ici.")
+    else:
+        for mdir in month_dirs:
+            ppt_files = sorted(mdir.glob("*.pptx"), reverse=True)
+            if not ppt_files:
+                continue
+            with st.expander(f"📅 {mdir.name} — {len(ppt_files)} deck(s)", expanded=True):
+                for ppt in ppt_files:
+                    xlsx = ppt.with_suffix(".xlsx")
+                    c1, c2, c3 = st.columns([4, 1, 1])
+                    c1.markdown(
+                        f"**{ppt.stem}**  \n"
+                        f"_{ppt.stat().st_size/1024:.0f} KB_"
+                    )
+                    c2.download_button(
+                        "⬇ .pptx",
+                        data=ppt.read_bytes(),
+                        file_name=ppt.name,
+                        mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        key=f"dl_pptx_{ppt.name}",
+                    )
+                    if xlsx.exists() and c3.button("✏ Éditer", key=f"edit_{ppt.name}"):
+                        try:
+                            deck = read_excel(xlsx.read_bytes(),
+                                              image_resolver=lambda n: n)
+                            rows = []
+                            for g in deck.groupes:
+                                for sg in g.sous_groupes:
+                                    for p in sg.produits:
+                                        rows.append({
+                                            "groupe": g.nom, "sous_groupe": sg.nom,
+                                            "nom": p.nom,
+                                            "packshot": p.packshot_path or "",
+                                            "nom_image": p.nom_image_path or "",
+                                            "prix_gros": p.prix_gros,
+                                            "prix_gros_net": p.prix_gros_net,
+                                            "colisage": p.colisage,
+                                            "colisage_prix_gros": p.colisage_prix_gros,
+                                            "colisage_prix_gros_net": p.colisage_prix_gros_net,
+                                            "logo_groupe": g.logo_path or "",
+                                            "is_promo": p.is_promo,
+                                            "type_promo": p.type_promo,
+                                            "promo_achat_qte": p.promo_achat_qte,
+                                            "promo_gratuit_qte": p.promo_gratuit_qte,
+                                            "promo_remise_pct": p.promo_remise_pct,
+                                            "promo_texte": p.promo_texte,
+                                        })
+                            ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+                            ss.titre = deck.titre
+                            ss.canal = deck.canal
+                            ss.mois = deck.mois
+                            st.success(
+                                f"Chargé {len(rows)} produits depuis {xlsx.name}. "
+                                "Ouvrez l'onglet **2. Content** pour éditer."
+                            )
+                        except Exception as exc:
+                            st.error(f"Échec du chargement: {exc}")
 
 # ---- Tab 1: Deck -----------------------------------------------------------
 with tab_deck:
@@ -580,9 +711,18 @@ with tab_generate:
             ))
 
         data = build_pptx(deck, with_subgroup_dividers=with_dividers)
-        st.success(f"Generated {len(deck.groupes)} group(s), "
-                   f"{sum(len(g.sous_groupes) for g in deck.groupes)} sub-group(s), "
-                   f"{sum(1 for _ in deck.iter_products())} product slide(s).")
+        # Auto-archive into archive/<YYYY-MM>/
+        archived = archive_deck(
+            data, ss.products_df,
+            {"titre": ss.titre, "canal": ss.canal, "mois": ss.mois},
+            mois=ss.mois,
+        )
+        st.success(
+            f"Generated {len(deck.groupes)} group(s), "
+            f"{sum(len(g.sous_groupes) for g in deck.groupes)} sub-group(s), "
+            f"{sum(1 for _ in deck.iter_products())} product slide(s). "
+            f"Archived at `{archived.relative_to(Path(__file__).resolve().parent)}`."
+        )
         st.download_button(
             "Download PPTX",
             data=data,
