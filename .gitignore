@@ -11,6 +11,11 @@ out/
 ~$*.pptx
 ~$*.xlsx
 
+# Local user content — never committed
+assets/images/
+archive/*/
+!archive/.gitkeep
+
 # IDE
 .vscode/
 .idea/

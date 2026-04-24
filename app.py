@@ -22,8 +22,10 @@ import openpyxl  # noqa: E402
 
 st.set_page_config(page_title="Plan Commercial Generator", layout="wide")
 
-IMAGE_DIR = Path(tempfile.gettempdir()) / "plan_commercial_images"
-IMAGE_DIR.mkdir(exist_ok=True)
+# Persistent image pool in the project so uploads survive restarts and
+# can be reused across sessions.
+IMAGE_DIR = Path(__file__).resolve().parent / "assets" / "images"
+IMAGE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Archive directory (project-root-relative so users find it easily)
 ARCHIVE_DIR = Path(__file__).resolve().parent / "archive"
@@ -629,13 +631,15 @@ with tab_content:
 
 # ---- Tab 3: Images ---------------------------------------------------------
 with tab_images:
-    st.subheader("Image pool")
+    st.subheader("Image pool (persistent)")
     st.caption(
-        "Upload logos, packshots and (optional) product-name PNGs. "
-        "Reference them by filename in the Products table."
+        f"Uploaded images are stored in `{IMAGE_DIR.relative_to(Path(__file__).resolve().parent)}` "
+        "and reused across app restarts. Reference them by filename in the "
+        "Products table, or drop them in place via the preview's drag zones."
     )
     ups = st.file_uploader(
-        "Upload images", type=["png", "jpg", "jpeg"],
+        "Upload images (drop many at once)",
+        type=["png", "jpg", "jpeg"],
         accept_multiple_files=True, key="up_pool",
     )
     if ups:
@@ -643,13 +647,30 @@ with tab_images:
             (IMAGE_DIR / f.name).write_bytes(f.getbuffer())
         st.success(f"Saved {len(ups)} image(s).")
 
-    existing = sorted(p.name for p in IMAGE_DIR.iterdir() if p.is_file())
+    existing = sorted(
+        [p for p in IMAGE_DIR.iterdir() if p.is_file()],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     if existing:
-        st.markdown(f"**{len(existing)} image(s) in pool:**")
+        total_kb = sum(p.stat().st_size for p in existing) / 1024
+        c1, c2 = st.columns([3, 1])
+        c1.markdown(f"**{len(existing)} image(s) — {total_kb:.0f} KB total**")
+        filt = c2.text_input("Filter", "", placeholder="e.g. MIO",
+                             label_visibility="collapsed")
+        if filt:
+            existing = [p for p in existing if filt.lower() in p.name.lower()]
+
         cols = st.columns(4)
-        for i, name in enumerate(existing):
+        from datetime import datetime as _dt
+        for i, p in enumerate(existing):
             with cols[i % 4]:
-                st.image(str(IMAGE_DIR / name), caption=name, width=180)
+                st.image(str(p), caption=p.name, width=180)
+                mtime = _dt.fromtimestamp(p.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+                st.caption(f"↳ {mtime}")
+                if st.button(f"🗑", key=f"del_img_{p.name}", help="Delete"):
+                    p.unlink(missing_ok=True)
+                    st.rerun()
     else:
         st.info("No images uploaded yet.")
 
