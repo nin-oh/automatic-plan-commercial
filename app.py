@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # for excel_reader
 
 from plan_commercial import (  # noqa: E402
     Deck, Group, Product, SubGroup, build_pptx, read_excel, write_template,
-    render_product, render_cover,
+    render_product, render_cover, export_pdf,
 )
 from plan_commercial.excel_io import PRODUIT_COLS  # noqa: E402
 import excel_reader as byfpc_reader  # noqa: E402
@@ -896,9 +896,21 @@ with tab_generate:
             f"{sum(1 for _ in deck.iter_products())} product slide(s). "
             f"Archived at `{archived.relative_to(Path(__file__).resolve().parent)}`."
         )
-        st.download_button(
-            "Download PPTX",
+        stem = f"{ss.titre.replace(' ', '_')}_{ss.canal.replace(' ', '_')}_{ss.mois.replace(' ', '_')}"
+        col_pptx, col_pdf = st.columns(2)
+        col_pptx.download_button(
+            "⬇ Download PPTX",
             data=data,
-            file_name=f"{ss.titre.replace(' ', '_')}_{ss.canal.replace(' ', '_')}.pptx",
+            file_name=f"{stem}.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            use_container_width=True,
+        )
+        with st.spinner("Rendering PDF..."):
+            pdf_bytes = export_pdf(deck)
+        col_pdf.download_button(
+            "⬇ Download PDF",
+            data=pdf_bytes,
+            file_name=f"{stem}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
         )

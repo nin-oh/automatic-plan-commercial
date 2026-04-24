@@ -280,7 +280,7 @@ def _render_promo(canvas, draw, product):
                           accent_word_idx=0, size=34)
 
 
-def render_cover(deck: Deck) -> bytes:
+def _cover_image(deck: Deck) -> Image.Image:
     canvas = Image.new("RGB", (W, H), (255, 255, 255))
     draw = ImageDraw.Draw(canvas)
     _paste(canvas, deck.background_path or G._asset("wood_background.png"), G.WOOD_POS)
@@ -293,6 +293,38 @@ def render_cover(deck: Deck) -> bytes:
                  size=20, bold=False, fill=(34, 34, 34))
     if deck.cover_photo_path:
         _paste(canvas, deck.cover_photo_path, (3.3, 4.3, 6.7, 2.9))
+    return canvas
+
+
+def _product_image(deck: Deck, group, product) -> Image.Image:
+    """Same content as render_product but returns the raw Image."""
+    from io import BytesIO as _B
+    png = render_product(deck, group, product)
+    return Image.open(_B(png)).convert("RGB")
+
+
+def export_pdf(deck: Deck) -> bytes:
+    """Render every slide to PNG and bundle into a multi-page PDF."""
+    pages: list[Image.Image] = [_cover_image(deck)]
+    for group in deck.groupes:
+        for subgroup in group.sous_groupes:
+            for product in subgroup.produits:
+                pages.append(_product_image(deck, group, product))
+    buf = BytesIO()
+    pages[0].save(
+        buf, format="PDF",
+        save_all=True,
+        append_images=pages[1:],
+        resolution=DPI,
+        title=deck.titre or "Plan Commercial",
+    )
+    return buf.getvalue()
+
+
+def render_cover(deck: Deck) -> bytes:
+    canvas = _cover_image(deck)
     buf = BytesIO()
     canvas.save(buf, format="PNG", optimize=True)
     return buf.getvalue()
+
+
