@@ -125,20 +125,23 @@ _TEMPLATE_ROWS = [
 def write_template(output_path: Optional[str] = None,
                    titre: str = "Plan Commercial",
                    canal: str = "Canal Gros",
-                   mois: str = "Avril 2026") -> bytes:
-    """Polished Excel template with Meta + Produits + Instructions sheets.
+                   mois: str = "Avril 2026",
+                   rows: Optional[list] = None) -> bytes:
+    """Polished Excel workbook with Meta + Produits + Instructions sheets.
+
+    By default writes the two-row MIO/IRIS demo (so a fresh user has an
+    example schema to learn from). Pass ``rows`` (a list of dicts keyed by
+    ``PRODUIT_COLS``) to export *actual* data — for instance the current
+    Streamlit session — keeping the same styling, dropdowns, and round-trip
+    fidelity.
 
     Layout of the Produits sheet:
       Row 1   merged title "Plan Commercial — Canal Gros — <mois>"
       Row 2   grouped section headers (Identification / Prix à l'unité / ...)
       Row 3   column names (matches ``PRODUIT_COLS``)
-      Row 4+  data rows (two seed rows including one promo example)
-
-    The output stays a valid input for ``read_excel``: the reader already
-    calls ``pd.read_excel(..., sheet_name='Produits')`` which honours the
-    header on whatever row pandas detects; we pass the explicit column names
-    unchanged so the round-trip is stable.
+      Row 4+  data rows
     """
+    actual_rows = rows if rows is not None else _TEMPLATE_ROWS
     wb = Workbook()
 
     # ---- Meta sheet ----
@@ -207,11 +210,15 @@ def write_template(output_path: Optional[str] = None,
     ws.freeze_panes = "A4"
     ws.auto_filter.ref = f"A3:{last_letter}3"
 
-    # Data rows (seed) + formatting
+    # Data rows + formatting
     data_start = 4
-    for r_idx, row in enumerate(_TEMPLATE_ROWS, start=data_start):
+    for r_idx, row in enumerate(actual_rows, start=data_start):
         for c_idx, col_name in enumerate(PRODUIT_COLS, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=row[col_name])
+            value = row.get(col_name) if hasattr(row, "get") else row[col_name]
+            # Coerce booleans cleanly so Excel shows TRUE/FALSE rather than 1/0
+            if col_name == "is_promo":
+                value = bool(value) if value not in (None, "") else False
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
             cell.alignment = Alignment(
                 horizontal="right" if col_name in _PRICE_COLS | _INT_COLS | _PCT_COLS
                 else ("center" if col_name in {"is_promo", "type_promo"}
@@ -226,7 +233,7 @@ def write_template(output_path: Optional[str] = None,
                 cell.number_format = '0'
             elif col_name in _PCT_COLS:
                 cell.number_format = '0.0'
-            if col_name == "is_promo" and row[col_name]:
+            if col_name == "is_promo" and value:
                 cell.font = Font(name="Calibri", size=10, color=_RED_DARK, bold=True)
         if (r_idx - data_start) % 2 == 1:
             for c_idx in range(1, n_cols + 1):

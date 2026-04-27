@@ -699,12 +699,60 @@ with tab_content:
     if mode == "Excel upload":
         col_a, col_b = st.columns([1, 2])
         with col_a:
+            st.markdown("**📋 Vide / exemple**")
             st.download_button(
-                "Download Excel template",
+                "Télécharger un template vide",
                 data=write_template(),
                 file_name="plan_commercial_template.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                help="Schéma + 2 lignes d'exemple (MIO, IRIS-promo). À remplir.",
+                use_container_width=True,
             )
+
+            n_rows = len(ss.products_df)
+            st.markdown("**📥 Données actuelles**")
+            if n_rows == 0:
+                st.caption("_Aucune donnée à exporter_")
+            else:
+                # Convert the live DataFrame into list-of-dicts for write_template.
+                current_rows = ss.products_df.to_dict(orient="records")
+                # Coerce types so Excel formatting + read_excel round-trip cleanly.
+                for r in current_rows:
+                    for k in ("prix_gros", "prix_gros_net",
+                              "colisage_prix_gros", "colisage_prix_gros_net",
+                              "promo_remise_pct",
+                              "packshot_left", "packshot_top",
+                              "packshot_width", "packshot_height"):
+                        try:
+                            r[k] = float(r.get(k) or 0)
+                        except (TypeError, ValueError):
+                            r[k] = 0.0
+                    for k in ("promo_achat_qte", "promo_gratuit_qte"):
+                        try:
+                            r[k] = int(r.get(k) or 0)
+                        except (TypeError, ValueError):
+                            r[k] = 0
+                    r["is_promo"] = bool(r.get("is_promo") or False)
+                    for k in ("groupe", "sous_groupe", "nom",
+                              "packshot", "nom_image",
+                              "colisage", "logo_groupe",
+                              "type_promo", "promo_texte"):
+                        v = r.get(k)
+                        r[k] = "" if v is None else str(v)
+                snapshot = write_template(
+                    titre=ss.titre, canal=ss.canal, mois=ss.mois,
+                    rows=current_rows,
+                )
+                st.download_button(
+                    f"Télécharger mes données ({n_rows} produits)",
+                    data=snapshot,
+                    file_name=f"{ss.titre.replace(' ', '_')}_"
+                              f"{ss.canal.replace(' ', '_')}_"
+                              f"{ss.mois.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    help="Exporte le tableau actuel — réuploadable plus tard.",
+                    use_container_width=True,
+                )
         with col_b:
             xlsx = st.file_uploader(
                 "Upload filled Excel (Meta/Produits template OR PL_Changes BySKU)",
