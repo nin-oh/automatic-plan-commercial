@@ -128,6 +128,42 @@ def _blank_products_df() -> pd.DataFrame:
     return pd.DataFrame(columns=PRODUIT_COLS)
 
 
+def _normalize_products_df(df: pd.DataFrame) -> pd.DataFrame:
+    """Coerce each column to its canonical dtype.
+
+    Rebuilding the DataFrame after an Excel re-upload (or merging a freshly-
+    added blank row) can leave columns with mixed dtypes — e.g. is_promo
+    becomes float64 when one cell is NaN. Streamlit's CheckboxColumn /
+    NumberColumn configs then refuse the column. Run this before each
+    data_editor render to keep types stable.
+    """
+    if len(df.columns) == 0:
+        return _blank_products_df()
+    out = df.copy()
+    if "is_promo" in out.columns:
+        out["is_promo"] = (
+            out["is_promo"].apply(
+                lambda v: bool(v) if not (isinstance(v, float) and pd.isna(v))
+                else False
+            )
+        ).astype(bool)
+    for c in ("prix_gros", "prix_gros_net",
+              "colisage_prix_gros", "colisage_prix_gros_net",
+              "promo_remise_pct",
+              "packshot_left", "packshot_top",
+              "packshot_width", "packshot_height"):
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0.0).astype(float)
+    for c in ("promo_achat_qte", "promo_gratuit_qte"):
+        if c in out.columns:
+            out[c] = pd.to_numeric(out[c], errors="coerce").fillna(0).astype(int)
+    for c in ("groupe", "sous_groupe", "nom", "packshot", "nom_image",
+              "colisage", "logo_groupe", "type_promo", "promo_texte"):
+        if c in out.columns:
+            out[c] = out[c].fillna("").astype(str)
+    return out
+
+
 # ---- Session state ---------------------------------------------------------
 ss = st.session_state
 ss.setdefault("titre", "Plan Commercial")
@@ -854,6 +890,10 @@ with tab_content:
         promo_only = st.checkbox("Afficher uniquement les promos", value=False)
 
     # Build filter mask
+    # Normalize dtypes once per render. Keeps the data_editor happy after
+    # Excel re-uploads (where columns can come back as float/object), after
+    # adding blank rows, or after concatenating results from the Brands tab.
+    ss.products_df = _normalize_products_df(ss.products_df)
     df_full = ss.products_df
     if len(df_full):
         mask = pd.Series(True, index=df_full.index)
