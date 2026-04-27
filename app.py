@@ -28,6 +28,21 @@ try:
 except ImportError:
     _HAS_CLICK = False
 
+# Fragment shim — st.fragment is Streamlit >=1.32. Older Streamlit gets a no-op.
+try:
+    _fragment = st.fragment
+except AttributeError:
+    def _fragment(func=None, **_kw):
+        if func is None:
+            return lambda f: f
+        return func
+
+
+@st.cache_data(show_spinner=False, max_entries=128)
+def _cached_thumb(pptx_path: str, mtime: float):
+    """Cached thumbnail bytes for an archived pptx."""
+    return _deck_thumbnail(Path(pptx_path))
+
 st.set_page_config(page_title="Plan Commercial Generator", layout="wide")
 
 # Persistent image pool in the project so uploads survive restarts and
@@ -206,7 +221,9 @@ def _deck_thumbnail(pptx_path: Path) -> bytes | None:
         return None
 
 
-with tab_home:
+
+@_fragment
+def render_home_tab():
     st.subheader("Plans archivés par mois")
     st.caption(
         "Chaque génération est sauvegardée dans `archive/<année-mois>/`. "
@@ -244,8 +261,8 @@ with tab_home:
                     xlsx = ppt.with_suffix(".xlsx")
                     c_thumb, c_meta, c_btns = st.columns([1, 3, 2])
 
-                    # Thumbnail
-                    thumb = _deck_thumbnail(ppt)
+                    # Thumbnail (cached on (path, mtime))
+                    thumb = _cached_thumb(str(ppt), ppt.stat().st_mtime)
                     if thumb:
                         c_thumb.image(thumb, use_container_width=True)
                     else:
@@ -308,6 +325,9 @@ with tab_home:
                         st.toast(f"Supprimé : {ppt.name}")
                         st.rerun()
 
+
+with tab_home:
+    render_home_tab()
 # ---- Tab 1: Deck -----------------------------------------------------------
 with tab_deck:
     st.subheader("Deck metadata")
@@ -335,205 +355,8 @@ with tab_deck:
             ss.cover_photo = save_upload(up)
         st.caption(f"Current: {ss.cover_photo or '(none)'}")
 
-# ---- Tab 2: Content --------------------------------------------------------
-with tab_content:
-    st.subheader("Product data")
-    mode = st.radio("Input mode", ["Manual", "Excel upload"], horizontal=True)
-
-    if mode == "Excel upload":
-        col_a, col_b = st.columns([1, 2])
-        with col_a:
-            st.download_button(
-                "Download Excel template",
-                data=write_template(),
-                file_name="plan_commercial_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        with col_b:
-            xlsx = st.file_uploader(
-                "Upload filled Excel (Meta/Produits template OR PL_Changes BySKU)",
-                type=["xlsx"], key="up_xlsx",
-            )
-            if xlsx is not None:
-                data = xlsx.getvalue()
-                try:
-                    sheet_names = openpyxl.load_workbook(
-                        BytesIO(data), read_only=True
-                    ).sheetnames
-                except Exception as exc:
-                    st.error(f"Can't open file: {exc}")
-                    sheet_names = []
-
-                if "BySKU" in sheet_names:
-                    # PL_Changes workbook — use the aggregated BySKU sheet
-                    try:
-                        tmp = Path(tempfile.gettempdir()) / "_uploaded.xlsx"
-                        tmp.write_bytes(data)
-                        products = byfpc_reader.read_bysku(tmp)
-                        rows = [{
-                            "groupe": p.category or "Sans catégorie",
-                            "sous_groupe": p.brand or "Sans marque",
-                            "nom": p.sku,
-                            "packshot": f"{p.sku}.png",
-                            "nom_image": "",
-                            "prix_gros": p.bp_new or 0.0,
-                            "prix_gros_net": p.net_new or 0.0,
-                            "colisage": "",
-                            "colisage_prix_gros": p.bp_new or 0.0,
-                            "colisage_prix_gros_net": p.net_new or 0.0,
-                            "logo_groupe": f"{p.brand}.png" if p.brand else "",
-                            "is_promo": False, "type_promo": "",
-                            "promo_achat_qte": 0, "promo_gratuit_qte": 0,
-                            "promo_remise_pct": 0.0, "promo_texte": "",
-                            "packshot_left": 0.0, "packshot_top": 0.0,
-                            "packshot_width": 0.0, "packshot_height": 0.0,
-                        } for p in products]
-                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
-                        st.success(
-                            f"Loaded {len(rows)} SKUs from BySKU "
-                            f"({ss.products_df['groupe'].nunique()} categories, "
-                            f"{ss.products_df['sous_groupe'].nunique()} brands)."
-                        )
-                        st.info(
-                            "Packshot filenames are set to `<SKU>.png` and brand "
-                            "logos to `<Brand>.png`. Upload matching images via "
-                            "drag-and-drop under the preview."
-                        )
-                    except Exception as exc:
-                        st.error(f"Failed to read BySKU sheet: {exc}")
-                elif "Meta" in sheet_names and "Produits" in sheet_names:
-                    try:
-                        deck = read_excel(data, image_resolver=lambda n: n)
-                        rows = []
-                        for g in deck.groupes:
-                            for sg in g.sous_groupes:
-                                for p in sg.produits:
-                                    rows.append({
-                                        "groupe": g.nom,
-                                        "sous_groupe": sg.nom,
-                                        "nom": p.nom,
-                                        "packshot": p.packshot_path or "",
-                                        "nom_image": p.nom_image_path or "",
-                                        "prix_gros": p.prix_gros,
-                                        "prix_gros_net": p.prix_gros_net,
-                                        "colisage": p.colisage,
-                                        "colisage_prix_gros": p.colisage_prix_gros,
-                                        "colisage_prix_gros_net": p.colisage_prix_gros_net,
-                                        "logo_groupe": g.logo_path or "",
-                                    })
-                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
-                        ss.titre, ss.canal, ss.mois = deck.titre, deck.canal, deck.mois
-                        st.success(f"Loaded {len(rows)} products from Meta/Produits template.")
-                    except Exception as exc:
-                        st.error(f"Failed to read template: {exc}")
-                elif sheet_names:
-                    st.error(
-                        f"Unrecognized workbook. Found sheets: {sheet_names}. "
-                        "Expected either `BySKU` (PL_Changes) or `Meta`+`Produits` "
-                        "(app template)."
-                    )
-
-    st.markdown("#### Products table")
-
-    # ---- Filters ----
-    with st.expander("Filtres & recherche", expanded=False):
-        col_s, col_b, col_c = st.columns([2, 2, 2])
-        search = col_s.text_input("Recherche (nom / marque / catégorie)", "")
-        brand_opts = sorted(
-            {str(v) for v in ss.products_df["sous_groupe"].dropna().unique()}
-        ) if len(ss.products_df) else []
-        cat_opts = sorted(
-            {str(v) for v in ss.products_df["groupe"].dropna().unique()}
-        ) if len(ss.products_df) else []
-        brand_filter = col_b.multiselect("Marque(s)", brand_opts)
-        cat_filter = col_c.multiselect("Catégorie(s)", cat_opts)
-        promo_only = st.checkbox("Afficher uniquement les promos", value=False)
-
-    # Build filter mask
-    df_full = ss.products_df
-    if len(df_full):
-        mask = pd.Series(True, index=df_full.index)
-        if search:
-            s = search.lower()
-            mask &= df_full.apply(
-                lambda r: s in str(r.get("nom") or "").lower()
-                       or s in str(r.get("sous_groupe") or "").lower()
-                       or s in str(r.get("groupe") or "").lower(),
-                axis=1,
-            )
-        if brand_filter:
-            mask &= df_full["sous_groupe"].astype(str).isin(brand_filter)
-        if cat_filter:
-            mask &= df_full["groupe"].astype(str).isin(cat_filter)
-        if promo_only:
-            mask &= df_full["is_promo"].astype(bool)
-        df_filtered = df_full[mask]
-    else:
-        df_filtered = df_full
-
-    # ---- Pagination ----
-    col_ps, col_pg, col_info = st.columns([1, 1, 3])
-    page_size = col_ps.selectbox(
-        "Lignes / page", [25, 50, 100, 200], index=0, key="page_size"
-    )
-    n_pages = max(1, (len(df_filtered) + page_size - 1) // page_size)
-    page = col_pg.number_input(
-        f"Page (1-{n_pages})", min_value=1, max_value=n_pages, value=1, step=1,
-        key="page_num",
-    )
-    start = (page - 1) * page_size
-    end = start + page_size
-    df_page = df_filtered.iloc[start:end]
-    col_info.caption(
-        f"{len(df_filtered)} / {len(df_full)} produits — "
-        f"affichage {start + 1 if len(df_page) else 0}–{start + len(df_page)}"
-    )
-
-    edited = st.data_editor(
-        df_page,
-        num_rows="fixed",
-        use_container_width=True,
-        column_config={
-            "prix_gros": st.column_config.NumberColumn(format="%.2f"),
-            "prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
-            "colisage_prix_gros": st.column_config.NumberColumn(format="%.2f"),
-            "colisage_prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
-            "is_promo": st.column_config.CheckboxColumn("Promo ?"),
-            "type_promo": st.column_config.SelectboxColumn(
-                "Type promo",
-                options=["", "gratuite", "remise", "remise+gratuite"],
-            ),
-            "promo_achat_qte": st.column_config.NumberColumn("Achat (N)", format="%d"),
-            "promo_gratuit_qte": st.column_config.NumberColumn("Gratuit (X)", format="%d"),
-            "promo_remise_pct": st.column_config.NumberColumn("Remise %", format="%.1f"),
-        },
-        key=f"products_editor_p{page}",
-    )
-
-    # Write edits back to the full df (indices are preserved from the slice)
-    for idx in edited.index:
-        if idx in ss.products_df.index:
-            for col in edited.columns:
-                ss.products_df.at[idx, col] = edited.at[idx, col]
-
-    # Manual row-add (replaces dynamic rows which don't play well with paging)
-    col_add, col_del = st.columns([1, 1])
-    if col_add.button("➕ Ajouter un produit vide"):
-        blank = {c: "" for c in PRODUIT_COLS}
-        for c in ["prix_gros", "prix_gros_net",
-                  "colisage_prix_gros", "colisage_prix_gros_net",
-                  "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct"]:
-            blank[c] = 0
-        blank["is_promo"] = False
-        ss.products_df = pd.concat(
-            [ss.products_df, pd.DataFrame([blank], columns=PRODUIT_COLS)],
-            ignore_index=True,
-        )
-        st.rerun()
-    if col_del.button("🗑️ Tout effacer", type="secondary"):
-        ss.products_df = _blank_products_df()
-        st.rerun()
-
+@_fragment
+def render_slide_editor():
     # ---- Live preview + per-row drag-drop uploads ----
     st.markdown("#### Preview + images")
     st.caption(
@@ -866,8 +689,214 @@ with tab_content:
                                          f"{int(mask.sum())} SKU(s).")
                                 st.rerun()
 
+
+
+# ---- Tab 2: Content --------------------------------------------------------
+with tab_content:
+    st.subheader("Product data")
+    mode = st.radio("Input mode", ["Manual", "Excel upload"], horizontal=True)
+
+    if mode == "Excel upload":
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            st.download_button(
+                "Download Excel template",
+                data=write_template(),
+                file_name="plan_commercial_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        with col_b:
+            xlsx = st.file_uploader(
+                "Upload filled Excel (Meta/Produits template OR PL_Changes BySKU)",
+                type=["xlsx"], key="up_xlsx",
+            )
+            if xlsx is not None:
+                data = xlsx.getvalue()
+                try:
+                    sheet_names = openpyxl.load_workbook(
+                        BytesIO(data), read_only=True
+                    ).sheetnames
+                except Exception as exc:
+                    st.error(f"Can't open file: {exc}")
+                    sheet_names = []
+
+                if "BySKU" in sheet_names:
+                    # PL_Changes workbook — use the aggregated BySKU sheet
+                    try:
+                        tmp = Path(tempfile.gettempdir()) / "_uploaded.xlsx"
+                        tmp.write_bytes(data)
+                        products = byfpc_reader.read_bysku(tmp)
+                        rows = [{
+                            "groupe": p.category or "Sans catégorie",
+                            "sous_groupe": p.brand or "Sans marque",
+                            "nom": p.sku,
+                            "packshot": f"{p.sku}.png",
+                            "nom_image": "",
+                            "prix_gros": p.bp_new or 0.0,
+                            "prix_gros_net": p.net_new or 0.0,
+                            "colisage": "",
+                            "colisage_prix_gros": p.bp_new or 0.0,
+                            "colisage_prix_gros_net": p.net_new or 0.0,
+                            "logo_groupe": f"{p.brand}.png" if p.brand else "",
+                            "is_promo": False, "type_promo": "",
+                            "promo_achat_qte": 0, "promo_gratuit_qte": 0,
+                            "promo_remise_pct": 0.0, "promo_texte": "",
+                            "packshot_left": 0.0, "packshot_top": 0.0,
+                            "packshot_width": 0.0, "packshot_height": 0.0,
+                        } for p in products]
+                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+                        st.success(
+                            f"Loaded {len(rows)} SKUs from BySKU "
+                            f"({ss.products_df['groupe'].nunique()} categories, "
+                            f"{ss.products_df['sous_groupe'].nunique()} brands)."
+                        )
+                        st.info(
+                            "Packshot filenames are set to `<SKU>.png` and brand "
+                            "logos to `<Brand>.png`. Upload matching images via "
+                            "drag-and-drop under the preview."
+                        )
+                    except Exception as exc:
+                        st.error(f"Failed to read BySKU sheet: {exc}")
+                elif "Meta" in sheet_names and "Produits" in sheet_names:
+                    try:
+                        deck = read_excel(data, image_resolver=lambda n: n)
+                        rows = []
+                        for g in deck.groupes:
+                            for sg in g.sous_groupes:
+                                for p in sg.produits:
+                                    rows.append({
+                                        "groupe": g.nom,
+                                        "sous_groupe": sg.nom,
+                                        "nom": p.nom,
+                                        "packshot": p.packshot_path or "",
+                                        "nom_image": p.nom_image_path or "",
+                                        "prix_gros": p.prix_gros,
+                                        "prix_gros_net": p.prix_gros_net,
+                                        "colisage": p.colisage,
+                                        "colisage_prix_gros": p.colisage_prix_gros,
+                                        "colisage_prix_gros_net": p.colisage_prix_gros_net,
+                                        "logo_groupe": g.logo_path or "",
+                                    })
+                        ss.products_df = pd.DataFrame(rows, columns=PRODUIT_COLS)
+                        ss.titre, ss.canal, ss.mois = deck.titre, deck.canal, deck.mois
+                        st.success(f"Loaded {len(rows)} products from Meta/Produits template.")
+                    except Exception as exc:
+                        st.error(f"Failed to read template: {exc}")
+                elif sheet_names:
+                    st.error(
+                        f"Unrecognized workbook. Found sheets: {sheet_names}. "
+                        "Expected either `BySKU` (PL_Changes) or `Meta`+`Produits` "
+                        "(app template)."
+                    )
+
+    st.markdown("#### Products table")
+
+    # ---- Filters ----
+    with st.expander("Filtres & recherche", expanded=False):
+        col_s, col_b, col_c = st.columns([2, 2, 2])
+        search = col_s.text_input("Recherche (nom / marque / catégorie)", "")
+        brand_opts = sorted(
+            {str(v) for v in ss.products_df["sous_groupe"].dropna().unique()}
+        ) if len(ss.products_df) else []
+        cat_opts = sorted(
+            {str(v) for v in ss.products_df["groupe"].dropna().unique()}
+        ) if len(ss.products_df) else []
+        brand_filter = col_b.multiselect("Marque(s)", brand_opts)
+        cat_filter = col_c.multiselect("Catégorie(s)", cat_opts)
+        promo_only = st.checkbox("Afficher uniquement les promos", value=False)
+
+    # Build filter mask
+    df_full = ss.products_df
+    if len(df_full):
+        mask = pd.Series(True, index=df_full.index)
+        if search:
+            s = search.lower()
+            mask &= df_full.apply(
+                lambda r: s in str(r.get("nom") or "").lower()
+                       or s in str(r.get("sous_groupe") or "").lower()
+                       or s in str(r.get("groupe") or "").lower(),
+                axis=1,
+            )
+        if brand_filter:
+            mask &= df_full["sous_groupe"].astype(str).isin(brand_filter)
+        if cat_filter:
+            mask &= df_full["groupe"].astype(str).isin(cat_filter)
+        if promo_only:
+            mask &= df_full["is_promo"].astype(bool)
+        df_filtered = df_full[mask]
+    else:
+        df_filtered = df_full
+
+    # ---- Pagination ----
+    col_ps, col_pg, col_info = st.columns([1, 1, 3])
+    page_size = col_ps.selectbox(
+        "Lignes / page", [25, 50, 100, 200], index=0, key="page_size"
+    )
+    n_pages = max(1, (len(df_filtered) + page_size - 1) // page_size)
+    page = col_pg.number_input(
+        f"Page (1-{n_pages})", min_value=1, max_value=n_pages, value=1, step=1,
+        key="page_num",
+    )
+    start = (page - 1) * page_size
+    end = start + page_size
+    df_page = df_filtered.iloc[start:end]
+    col_info.caption(
+        f"{len(df_filtered)} / {len(df_full)} produits — "
+        f"affichage {start + 1 if len(df_page) else 0}–{start + len(df_page)}"
+    )
+
+    edited = st.data_editor(
+        df_page,
+        num_rows="fixed",
+        use_container_width=True,
+        column_config={
+            "prix_gros": st.column_config.NumberColumn(format="%.2f"),
+            "prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
+            "colisage_prix_gros": st.column_config.NumberColumn(format="%.2f"),
+            "colisage_prix_gros_net": st.column_config.NumberColumn(format="%.2f"),
+            "is_promo": st.column_config.CheckboxColumn("Promo ?"),
+            "type_promo": st.column_config.SelectboxColumn(
+                "Type promo",
+                options=["", "gratuite", "remise", "remise+gratuite"],
+            ),
+            "promo_achat_qte": st.column_config.NumberColumn("Achat (N)", format="%d"),
+            "promo_gratuit_qte": st.column_config.NumberColumn("Gratuit (X)", format="%d"),
+            "promo_remise_pct": st.column_config.NumberColumn("Remise %", format="%.1f"),
+        },
+        key=f"products_editor_p{page}",
+    )
+
+    # Write edits back to the full df (indices are preserved from the slice)
+    for idx in edited.index:
+        if idx in ss.products_df.index:
+            for col in edited.columns:
+                ss.products_df.at[idx, col] = edited.at[idx, col]
+
+    # Manual row-add (replaces dynamic rows which don't play well with paging)
+    col_add, col_del = st.columns([1, 1])
+    if col_add.button("➕ Ajouter un produit vide"):
+        blank = {c: "" for c in PRODUIT_COLS}
+        for c in ["prix_gros", "prix_gros_net",
+                  "colisage_prix_gros", "colisage_prix_gros_net",
+                  "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct"]:
+            blank[c] = 0
+        blank["is_promo"] = False
+        ss.products_df = pd.concat(
+            [ss.products_df, pd.DataFrame([blank], columns=PRODUIT_COLS)],
+            ignore_index=True,
+        )
+        st.rerun()
+    if col_del.button("🗑️ Tout effacer", type="secondary"):
+        ss.products_df = _blank_products_df()
+        st.rerun()
+
+    render_slide_editor()
+
+
 # ---- Tab: Brands (bulk packshot workflow) ----------------------------------
-with tab_brands:
+
+@_fragment
+def render_brands_tab():
     st.subheader("Travail par marque")
     st.caption(
         "Choisissez une marque, déposez plusieurs packshots d'un coup — "
@@ -1024,8 +1053,13 @@ with tab_brands:
                 )
 
 
+
+with tab_brands:
+    render_brands_tab()
 # ---- Tab: Images (asset library) -------------------------------------------
-with tab_images:
+
+@_fragment
+def render_images_tab():
     st.subheader("Bibliothèque d'images")
     st.caption(
         "Déposez ici tous les packshots, logos et badges. Les images sont "
@@ -1129,6 +1163,9 @@ with tab_images:
                             image_assets.delete_asset(IMAGE_DIR, m.filename)
                             st.rerun()
 
+
+with tab_images:
+    render_images_tab()
 # ---- Tab 4: Generate -------------------------------------------------------
 with tab_generate:
     st.subheader("Summary")
