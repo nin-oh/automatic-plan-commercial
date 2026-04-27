@@ -66,15 +66,27 @@ Missing packshot (`products/<SKU>.png`) → falls back to `brands/<Brand>.png`, 
 
 The reference deck was 175 MB because Office re-embedded each media item per slide. This generator caches every stable asset as a single `BytesIO` and reuses the stream — python-pptx content-hashes it and embeds once. A 140-product deck is typically under 20 MB.
 
-## Streamlit app — the GUI path
+## GUI — two builds
+
+Two interchangeable interfaces; pick the one that feels best on your machine.
+
+|              | Streamlit (`app.py`)             | NiceGUI (`app_ng.py`)           |
+|--------------|-----------------------------------|----------------------------------|
+| Launcher     | `run.bat` / `run.sh`              | `run_ng.bat` / `run_ng.sh`       |
+| URL          | `http://localhost:8501`           | `http://localhost:8502`          |
+| Re-run model | Whole-page on every input         | Component-level (`@ui.refreshable`) |
+| Tabs         | Home / Deck / Content / Brands / Images / Generate | Single page (MVP — Brands/Images/Home archived in Streamlit for now) |
+| Best for     | Familiar look, all features today | Snappier when editing 100+ SKUs  |
 
 ```
 pip install -r requirements.txt
-streamlit run app.py
-# or double-click run.bat (Windows) / run.sh (macOS/Linux)
+streamlit run app.py     # or python app_ng.py
 ```
 
-Four tabs: **Deck** (metadata, banner / background / cover overrides), **Content** (Excel upload *or* editable products table + live PNG preview of any slide), **Images** (pool of uploaded logos/packshots referenced by filename), **Generate** (slide count + download).
+Both reuse the same backend — `python-pptx` generator, Pillow preview, Excel I/O, image library. Only the UI layer differs.
+
+### Streamlit four tabs
+**Deck** (metadata, banner / background / cover overrides), **Content** (Excel upload *or* editable products table + live PNG preview of any slide), **Images** (pool of uploaded logos/packshots referenced by filename), **Generate** (slide count + download).
 
 The app uses a simpler, self-contained Excel template (`Meta` + `Produits` sheets) — see **"Excel template"** section below. It's decoupled from the CLI's `PL_Changes_*.xlsx` schema.
 
@@ -93,6 +105,8 @@ automatic-plan-commercial/
 ├── product_layer.py          # title + price tables + packshot
 ├── app.py                    # Streamlit UI
 ├── run.bat / run.sh          # Streamlit one-click launchers
+├── app_ng.py                 # NiceGUI build (alt UI)
+├── run_ng.bat / run_ng.sh    # NiceGUI one-click launchers
 ├── requirements.txt
 ├── assets/
 │   ├── stable/  categories/  brands/  products/
