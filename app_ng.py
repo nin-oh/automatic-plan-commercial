@@ -126,6 +126,7 @@ def _slug(s: str) -> str:
 # ---------------------------------------------------------------------------
 # UI: Deck metadata
 # ---------------------------------------------------------------------------
+@ui.refreshable
 def render_deck_form():
     with ui.card().classes("w-full"):
         ui.label("Deck").classes("text-h6 text-red-700")
@@ -459,6 +460,488 @@ def _archive_month(mois: str) -> str:
 # ---------------------------------------------------------------------------
 # Page
 # ---------------------------------------------------------------------------
+def _load_archived_xlsx(xlsx: Path) -> int:
+    """Reload an archived plan into S. Returns the row count."""
+    deck = read_excel(xlsx.read_bytes(), image_resolver=lambda n: n)
+    S.titre, S.canal, S.mois = deck.titre, deck.canal, deck.mois
+    S.products = []
+    for g in deck.groupes:
+        for sg in g.sous_groupes:
+            for p in sg.produits:
+                S.products.append({
+                    "groupe": g.nom, "sous_groupe": sg.nom, "nom": p.nom,
+                    "packshot": p.packshot_path or "",
+                    "nom_image": p.nom_image_path or "",
+                    "prix_gros": p.prix_gros,
+                    "prix_gros_net": p.prix_gros_net,
+                    "colisage": p.colisage,
+                    "colisage_prix_gros": p.colisage_prix_gros,
+                    "colisage_prix_gros_net": p.colisage_prix_gros_net,
+                    "logo_groupe": g.logo_path or "",
+                    "is_promo": p.is_promo, "type_promo": p.type_promo,
+                    "promo_achat_qte": p.promo_achat_qte,
+                    "promo_gratuit_qte": p.promo_gratuit_qte,
+                    "promo_remise_pct": p.promo_remise_pct,
+                    "promo_texte": p.promo_texte,
+                    "packshot_left": p.packshot_left,
+                    "packshot_top": p.packshot_top,
+                    "packshot_width": p.packshot_width,
+                    "packshot_height": p.packshot_height,
+                })
+    S.current_idx = 0
+    return len(S.products)
+
+
+def _deck_thumbnail(pptx_path: Path) -> Optional[bytes]:
+    """Return cached PNG thumbnail bytes (built lazily from sidecar xlsx)."""
+    thumb = pptx_path.with_suffix(".thumb.png")
+    if thumb.exists():
+        try:
+            return thumb.read_bytes()
+        except OSError:
+            pass
+    xlsx = pptx_path.with_suffix(".xlsx")
+    if not xlsx.exists():
+        return None
+    try:
+        deck = read_excel(xlsx.read_bytes(), image_resolver=resolve_image)
+        first = next(deck.iter_products(), None)
+        if first:
+            g, _, p = first
+            png = render_product(deck, g, p)
+        else:
+            png = render_cover(deck)
+        im = Image.open(io.BytesIO(png))
+        ratio = 400 / im.width
+        im = im.resize((400, int(im.height * ratio)), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="PNG", optimize=True)
+        data = buf.getvalue()
+        thumb.write_bytes(data)
+        return data
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# UI: 🏠 Home / Archive
+# ---------------------------------------------------------------------------
+@ui.refreshable
+def render_home_tab():
+    ui.label("Plans archivés par mois").classes("text-h5 text-red-700")
+    ui.label(
+        "Chaque génération est sauvegardée dans archive/<année-mois>/. "
+        "Téléchargez une archive, rechargez-la dans l'éditeur ou supprimez-la."
+    ).classes("text-sm text-gray-500")
+
+    month_dirs = sorted(
+        [p for p in ARCHIVE_DIR.iterdir() if p.is_dir()], reverse=True,
+    )
+    if not month_dirs:
+        ui.label("Aucun plan archivé pour le moment. Générez-en un dans l'onglet "
+                 "✏ Édition.").classes("italic text-gray-500")
+        return
+
+    total_decks = sum(len(list(m.glob('*.pptx'))) for m in month_dirs)
+    total_size = sum(p.stat().st_size for m in month_dirs for p in m.glob('*.pptx'))
+    ui.label(f"{total_decks} deck(s) sur {len(month_dirs)} mois — "
+             f"{total_size/1024/1024:.1f} MB").classes("text-sm text-gray-600")
+
+    for mdir in month_dirs:
+        ppt_files = sorted(mdir.glob("*.pptx"), reverse=True)
+        if not ppt_files:
+            continue
+        m_size = sum(p.stat().st_size for p in ppt_files) / 1024 / 1024
+        with ui.expansion(
+            f"📅 {mdir.name} — {len(ppt_files)} deck(s), {m_size:.1f} MB",
+            value=True,
+        ).classes("w-full"):
+            for ppt in ppt_files:
+                xlsx = ppt.with_suffix(".xlsx")
+                with ui.card().classes("w-full"):
+                    with ui.row().classes("items-start gap-4 w-full no-wrap"):
+                        thumb = _deck_thumbnail(ppt)
+                        if thumb:
+                            ui.image(_png_to_pil(thumb)).classes("w-48")
+                        else:
+                            ui.label("(pas d'aperçu)").classes("text-gray-400 italic")
+
+                        with ui.column().classes("grow"):
+                            ui.label(ppt.stem).classes("text-subtitle1")
+                            ui.label(f"{ppt.stat().st_size/1024:.0f} KB") \
+                                .classes("text-sm text-gray-500")
+
+                            with ui.row().classes("gap-2"):
+                                _btn_download_pptx(ppt)
+                                if xlsx.exists():
+                                    _btn_edit_archive(xlsx)
+                                    _btn_duplicate_archive(xlsx)
+                                _btn_delete_archive(ppt, xlsx)
+
+
+def _btn_download_pptx(ppt: Path):
+    def go():
+        ui.download(ppt.read_bytes(), ppt.name)
+    ui.button("⬇ PPTX", on_click=go).props("color=red")
+
+
+def _btn_edit_archive(xlsx: Path):
+    def go():
+        try:
+            n = _load_archived_xlsx(xlsx)
+            ui.notify(f"Chargé {n} produits. Allez dans ✏ Édition.")
+            render_products_table.refresh()
+            render_preview.refresh()
+            render_summary.refresh()
+        except Exception as exc:
+            ui.notify(f"Échec: {exc}", type="negative")
+    ui.button("✏ Éditer", on_click=go).props("flat color=red")
+
+
+def _btn_duplicate_archive(xlsx: Path):
+    def go():
+        try:
+            n = _load_archived_xlsx(xlsx)
+            S.mois = datetime.now().strftime("%B %Y")
+            ui.notify(f"Dupliqué — {n} produits, mois → {S.mois}")
+            render_products_table.refresh()
+            render_preview.refresh()
+            render_summary.refresh()
+            render_deck_form.refresh()
+        except Exception as exc:
+            ui.notify(f"Échec: {exc}", type="negative")
+    ui.button("📄 Dupliquer", on_click=go).props("flat")
+
+
+def _btn_delete_archive(ppt: Path, xlsx: Path):
+    def confirm_delete():
+        with ui.dialog() as dialog, ui.card():
+            ui.label(f"Supprimer définitivement {ppt.name} ?")
+            with ui.row().classes("gap-2"):
+                ui.button("Annuler", on_click=dialog.close).props("flat")
+                def do():
+                    ppt.unlink(missing_ok=True)
+                    xlsx.unlink(missing_ok=True)
+                    ppt.with_suffix(".thumb.png").unlink(missing_ok=True)
+                    ui.notify(f"Supprimé : {ppt.name}")
+                    dialog.close()
+                    render_home_tab.refresh()
+                ui.button("Supprimer", on_click=do).props("color=red")
+        dialog.open()
+    ui.button("🗑", on_click=confirm_delete).props("flat color=grey")
+
+
+# ---------------------------------------------------------------------------
+# UI: 🏷 Brands
+# ---------------------------------------------------------------------------
+@ui.refreshable
+def render_brands_tab():
+    ui.label("Travail par marque").classes("text-h5 text-red-700")
+    ui.label(
+        "Choisissez une marque, déposez plusieurs packshots d'un coup — "
+        "associés aux SKUs existants ou utilisés pour créer de nouvelles slides."
+    ).classes("text-sm text-gray-500")
+
+    if not S.products:
+        ui.label("Aucun produit chargé. Importez un Excel dans ✏ Édition.") \
+            .classes("italic text-gray-500")
+        return
+
+    # Brand lives in sous_groupe (ByFPC) or groupe (manual template)
+    brand_col = "sous_groupe"
+    if not any(str(p.get("sous_groupe") or "").strip() for p in S.products):
+        brand_col = "groupe"
+
+    brand_counts: dict[str, int] = {}
+    for p in S.products:
+        b = str(p.get(brand_col) or "Sans marque")
+        brand_counts[b] = brand_counts.get(b, 0) + 1
+    brands = sorted(brand_counts.keys())
+
+    sel_brand_holder = {"v": brands[0]}
+
+    def on_brand_change(e):
+        sel_brand_holder["v"] = e.value
+        render_brand_panel.refresh()
+
+    ui.select(
+        options={b: f"{b} ({brand_counts[b]} SKUs)" for b in brands},
+        value=brands[0],
+        on_change=on_brand_change,
+        label="Marque",
+    ).classes("w-80")
+
+    @ui.refreshable
+    def render_brand_panel():
+        sel = sel_brand_holder["v"]
+        rows = [(i, p) for i, p in enumerate(S.products)
+                if str(p.get(brand_col) or "") == sel]
+        n_with_pack = sum(
+            1 for _, p in rows if resolve_image(p.get("packshot"))
+        )
+
+        with ui.row().classes("w-full gap-4"):
+            with ui.card().classes("min-w-32"):
+                ui.label(str(len(rows))).classes("text-h4 text-red-700")
+                ui.label("SKUs").classes("text-caption")
+            with ui.card().classes("min-w-32"):
+                ui.label(str(n_with_pack)).classes("text-h4 text-green-700")
+                ui.label("avec packshot").classes("text-caption")
+            with ui.card().classes("min-w-32"):
+                ui.label(str(len(rows) - n_with_pack)).classes("text-h4 text-orange-600")
+                ui.label("sans packshot").classes("text-caption")
+
+        # Brand logo
+        with ui.card().classes("w-full"):
+            ui.label("Logo de la marque").classes("text-subtitle1")
+            with ui.row().classes("items-center gap-4"):
+                logo_path = next(
+                    (resolve_image(p.get("logo_groupe")) for _, p in rows
+                     if resolve_image(p.get("logo_groupe"))),
+                    None,
+                )
+                if logo_path:
+                    ui.image(logo_path).classes("w-32")
+                else:
+                    ui.label("(aucun)").classes("text-gray-400 italic")
+
+                def on_logo_upload(e: events.UploadEventArguments):
+                    target = f"{_slug(sel)}.png"
+                    image_assets.register_upload(
+                        IMAGE_DIR, target, e.content.read(),
+                        brand=sel, type_="logo",
+                    )
+                    cnt = 0
+                    for _, p in rows:
+                        p["logo_groupe"] = target
+                        cnt += 1
+                    ui.notify(f"Logo appliqué à {cnt} SKU(s).")
+                    render_brand_panel.refresh()
+                    render_preview.refresh()
+
+                ui.upload(on_upload=on_logo_upload, auto_upload=True) \
+                    .props('label="Drop logo"  accept=".png,.jpg,.jpeg"').classes("w-80")
+
+        # Bulk packshot upload
+        with ui.card().classes("w-full"):
+            ui.label("Dépôt en masse de packshots").classes("text-subtitle1")
+            mode_holder = {"v": "match"}
+
+            def on_mode(e):
+                mode_holder["v"] = e.value
+
+            ui.toggle(
+                {"match": "Matcher par nom de fichier",
+                 "create": "Créer une nouvelle slide pour chaque image"},
+                value="match", on_change=on_mode,
+            )
+
+            def on_bulk(e: events.MultiUploadEventArguments):
+                mode = mode_holder["v"]
+                matched = missed = created = 0
+                for name, content in zip(e.names, e.contents):
+                    data = content.read()
+                    image_assets.register_upload(
+                        IMAGE_DIR, name, data, brand=sel, type_="packshot",
+                    )
+                    stem = Path(name).stem.lower()
+                    if mode == "match":
+                        target = None
+                        for i, p in rows:
+                            if str(p.get("packshot")) == name:
+                                target = i; break
+                        if target is None:
+                            for i, p in rows:
+                                sku = str(p.get("nom") or "").lower()
+                                if sku and (sku in stem or stem in sku):
+                                    target = i; break
+                        if target is not None:
+                            S.products[target]["packshot"] = name
+                            matched += 1
+                        else:
+                            missed += 1
+                    else:
+                        # Create blank SKU row
+                        first_row = rows[0][1] if rows else {}
+                        blank = {c: "" for c in PRODUIT_COLS}
+                        for c in ("prix_gros", "prix_gros_net",
+                                  "colisage_prix_gros", "colisage_prix_gros_net",
+                                  "promo_achat_qte", "promo_gratuit_qte",
+                                  "promo_remise_pct",
+                                  "packshot_left", "packshot_top",
+                                  "packshot_width", "packshot_height"):
+                            blank[c] = 0
+                        blank["is_promo"] = False
+                        blank[brand_col] = sel
+                        blank["groupe"] = first_row.get("groupe", "") if brand_col == "sous_groupe" else sel
+                        blank["nom"] = Path(name).stem
+                        blank["packshot"] = name
+                        S.products.append(blank)
+                        created += 1
+                msgs = []
+                if matched: msgs.append(f"{matched} matchés")
+                if missed:  msgs.append(f"{missed} sans correspondance")
+                if created: msgs.append(f"{created} nouvelles slides")
+                ui.notify(", ".join(msgs) or "Rien à faire.")
+                render_brand_panel.refresh()
+                render_products_table.refresh()
+                render_preview.refresh()
+                render_summary.refresh()
+
+            ui.upload(on_multi_upload=on_bulk, multiple=True, auto_upload=True) \
+                .props('accept=".png,.jpg,.jpeg" label="Glissez plusieurs packshots"') \
+                .classes("w-full")
+
+        # Grid of SKUs in this brand
+        with ui.card().classes("w-full"):
+            ui.label(f"SKUs — {sel}").classes("text-subtitle1")
+            with ui.grid(columns=4).classes("w-full gap-2"):
+                for i, p in rows:
+                    pack = resolve_image(p.get("packshot"))
+                    with ui.card().classes("p-2"):
+                        if pack:
+                            ui.image(pack).classes("h-24")
+                        else:
+                            ui.label("(pas d'image)") \
+                                .classes("text-gray-400 italic h-24 flex items-center")
+                        ui.label(p.get("nom") or "(sans nom)") \
+                            .classes("text-caption truncate")
+                        promo = " 🔥" if p.get("is_promo") else ""
+                        ui.label(
+                            f"PG {float(p.get('prix_gros') or 0):.2f} ·"
+                            f" Net {float(p.get('prix_gros_net') or 0):.2f}{promo}"
+                        ).classes("text-caption text-gray-500")
+
+    render_brand_panel()
+
+
+# ---------------------------------------------------------------------------
+# UI: 📚 Images library
+# ---------------------------------------------------------------------------
+@ui.refreshable
+def render_images_tab():
+    ui.label("Bibliothèque d'images").classes("text-h5 text-red-700")
+    ui.label(
+        "Tous les packshots, logos et badges. Sauvegardés en permanence et "
+        "réutilisables dans n'importe quel plan."
+    ).classes("text-sm text-gray-500")
+
+    # Mass upload
+    def on_pool_upload(e: events.MultiUploadEventArguments):
+        for name, content in zip(e.names, e.contents):
+            image_assets.register_upload(IMAGE_DIR, name, content.read())
+        ui.notify(f"{len(e.names)} image(s) ajoutée(s).")
+        render_images_tab.refresh()
+
+    with ui.card().classes("w-full"):
+        ui.upload(on_multi_upload=on_pool_upload, multiple=True, auto_upload=True) \
+            .props('accept=".png,.jpg,.jpeg,.webp" '
+                   'label="📥 Glissez autant d\'images que vous voulez"').classes("w-full")
+
+    assets = image_assets.load_metadata(IMAGE_DIR)
+    if not assets:
+        ui.label("Aucune image. Déposez-en ci-dessus.").classes("italic")
+        return
+
+    total_kb = sum(m.size for m in assets.values()) / 1024
+    brand_counts: dict[str, int] = {}
+    for m in assets.values():
+        brand_counts[m.brand or "?"] = brand_counts.get(m.brand or "?", 0) + 1
+    brands_opts = [""] + sorted(brand_counts.keys())
+    types_opts = ["", "packshot", "logo", "badge", "other"]
+
+    filt = {"search": "", "brand": "", "type": ""}
+
+    def refresh_grid():
+        render_images_grid.refresh()
+
+    with ui.card().classes("w-full"):
+        ui.label(f"{len(assets)} images — {total_kb:.0f} KB total") \
+            .classes("text-subtitle1")
+        with ui.row().classes("items-center gap-2 w-full"):
+            ui.input(label="🔎 Recherche", placeholder="nom, marque, tag",
+                     on_change=lambda e: (filt.update(search=e.value or ""),
+                                          refresh_grid())) \
+                .props("dense outlined").classes("w-64")
+            ui.select(
+                options={"": "Toutes marques", **{b: b for b in brands_opts if b}},
+                value="",
+                on_change=lambda e: (filt.update(brand=e.value or ""), refresh_grid()),
+                label="Marque",
+            ).classes("w-40")
+            ui.select(
+                options={"": "Tous types", **{t: t for t in types_opts if t}},
+                value="",
+                on_change=lambda e: (filt.update(type=e.value or ""), refresh_grid()),
+                label="Type",
+            ).classes("w-40")
+
+            def bulk_delete():
+                rows = image_assets.list_assets(
+                    IMAGE_DIR,
+                    brand=filt["brand"] or None,
+                    type_=filt["type"] or None,
+                    search=filt["search"] or None,
+                )
+                with ui.dialog() as dlg, ui.card():
+                    ui.label(f"Supprimer définitivement les "
+                             f"{len(rows)} images filtrées ?")
+                    with ui.row():
+                        ui.button("Annuler", on_click=dlg.close).props("flat")
+                        def do():
+                            for m in rows:
+                                image_assets.delete_asset(IMAGE_DIR, m.filename)
+                            ui.notify(f"{len(rows)} image(s) supprimée(s).")
+                            dlg.close()
+                            render_images_tab.refresh()
+                        ui.button("Supprimer", on_click=do).props("color=red")
+                dlg.open()
+            ui.button("🗑 Supprimer la sélection filtrée",
+                      on_click=bulk_delete).props("flat color=grey")
+
+    @ui.refreshable
+    def render_images_grid():
+        rows = image_assets.list_assets(
+            IMAGE_DIR,
+            brand=filt["brand"] or None,
+            type_=filt["type"] or None,
+            search=filt["search"] or None,
+        )
+        if not rows:
+            ui.label("Aucune image ne correspond.").classes("italic")
+            return
+        with ui.grid(columns=4).classes("w-full gap-2"):
+            for m in rows:
+                with ui.card().classes("p-2"):
+                    p = IMAGE_DIR / m.filename
+                    if p.exists():
+                        ui.image(str(p)).classes("h-32")
+                    ui.label(m.filename).classes("text-caption truncate")
+                    used = image_assets.count_usage(m.filename, _products_df())
+                    used_str = f" · utilisé {used}×" if used else ""
+                    ui.label(f"{m.brand or '?'} · {m.type}{used_str}") \
+                        .classes("text-caption text-gray-500")
+
+                    def delete_one(filename=m.filename):
+                        image_assets.delete_asset(IMAGE_DIR, filename)
+                        render_images_tab.refresh()
+
+                    with ui.row().classes("gap-1"):
+                        ui.button("🗑", on_click=delete_one).props("flat dense color=grey")
+
+    render_images_grid()
+
+
+def _products_df():
+    """Tiny shim: image_assets.count_usage expects a pandas DataFrame, but
+    our state uses list-of-dicts. Build a temporary DataFrame here."""
+    import pandas as pd
+    return pd.DataFrame(S.products) if S.products else pd.DataFrame()
+
+
+# ---------------------------------------------------------------------------
+# Page with tabs
+# ---------------------------------------------------------------------------
 @ui.page("/")
 def main():
     ui.colors(primary="#C8102E")
@@ -466,14 +949,28 @@ def main():
         ui.label("Plan Commercial — PPTX Generator").classes("text-h5 text-white")
         ui.label("NiceGUI build").classes("text-caption text-white opacity-80")
 
-    with ui.row().classes("w-full no-wrap gap-4 q-pa-md"):
-        with ui.column().classes("w-1/2 gap-3"):
-            render_deck_form()
-            render_excel_uploader()
-            render_products_table()
-            render_summary()
-        with ui.column().classes("w-1/2 gap-3"):
-            render_preview()
+    with ui.tabs().classes("w-full") as tabs:
+        t_home    = ui.tab("🏠 Home")
+        t_edit    = ui.tab("✏ Édition")
+        t_brands  = ui.tab("🏷 Marques")
+        t_images  = ui.tab("📚 Images")
+
+    with ui.tab_panels(tabs, value=t_edit).classes("w-full"):
+        with ui.tab_panel(t_home):
+            render_home_tab()
+        with ui.tab_panel(t_edit):
+            with ui.row().classes("w-full no-wrap gap-4 q-pa-md"):
+                with ui.column().classes("w-1/2 gap-3"):
+                    render_deck_form()
+                    render_excel_uploader()
+                    render_products_table()
+                    render_summary()
+                with ui.column().classes("w-1/2 gap-3"):
+                    render_preview()
+        with ui.tab_panel(t_brands):
+            render_brands_tab()
+        with ui.tab_panel(t_images):
+            render_images_tab()
 
 
 ui.run(

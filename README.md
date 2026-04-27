@@ -75,7 +75,7 @@ Two interchangeable interfaces; pick the one that feels best on your machine.
 | Launcher     | `run.bat` / `run.sh`              | `run_ng.bat` / `run_ng.sh`       |
 | URL          | `http://localhost:8501`           | `http://localhost:8502`          |
 | Re-run model | Whole-page on every input         | Component-level (`@ui.refreshable`) |
-| Tabs         | Home / Deck / Content / Brands / Images / Generate | Single page (MVP — Brands/Images/Home archived in Streamlit for now) |
+| Tabs         | Home / Deck / Content / Brands / Images / Generate | 🏠 Home / ✏ Édition / 🏷 Marques / 📚 Images |
 | Best for     | Familiar look, all features today | Snappier when editing 100+ SKUs  |
 
 ```
