@@ -9,6 +9,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
 from .model import Deck, Group, Product, SubGroup
+from .promo_split import expand_multi_promos
 
 PRODUIT_COLS = [
     "groupe", "sous_groupe", "nom",
@@ -20,6 +21,11 @@ PRODUIT_COLS = [
     "is_promo", "type_promo",
     "promo_achat_qte", "promo_gratuit_qte", "promo_remise_pct",
     "promo_texte",
+    # Promo decoration toggles + image overrides + per-role product images
+    "promo_carton_left", "promo_carton_right",
+    "promo_ribbon_left", "promo_ribbon_right",
+    "promo_carton_image", "promo_ribbon_image",
+    "promo_remise_image", "promo_gratuite_image",
     # Packshot position overrides (inches; 0 = use default)
     "packshot_left", "packshot_top", "packshot_width", "packshot_height",
 ]
@@ -384,25 +390,44 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
             subgroups[key] = SubGroup(nom=sgname)
             groups[gname].sous_groupes.append(subgroups[key])
 
-        subgroups[key].produits.append(Product(
-            nom=_clean(row.get("nom")),
-            packshot_path=resolve(row.get("packshot")),
-            nom_image_path=resolve(row.get("nom_image")),
-            prix_gros=_num(row.get("prix_gros")),
-            prix_gros_net=_num(row.get("prix_gros_net")),
-            colisage=_clean(row.get("colisage")),
-            colisage_prix_gros=_num(row.get("colisage_prix_gros")),
-            colisage_prix_gros_net=_num(row.get("colisage_prix_gros_net")),
-            is_promo=_bool(row.get("is_promo")),
-            type_promo=_clean(row.get("type_promo")),
-            promo_achat_qte=int(_num(row.get("promo_achat_qte"))),
-            promo_gratuit_qte=int(_num(row.get("promo_gratuit_qte"))),
-            promo_remise_pct=_num(row.get("promo_remise_pct")),
-            promo_texte=_clean(row.get("promo_texte")),
-            packshot_left=_num(row.get("packshot_left")),
-            packshot_top=_num(row.get("packshot_top")),
-            packshot_width=_num(row.get("packshot_width")),
-            packshot_height=_num(row.get("packshot_height")),
-        ))
+        # Pull into a plain dict so the splitter can read/override fields, then
+        # emit one Product per `//`-separated promo segment.
+        base = {
+            "is_promo": _bool(row.get("is_promo")),
+            "type_promo": _clean(row.get("type_promo")),
+            "promo_achat_qte": int(_num(row.get("promo_achat_qte"))),
+            "promo_gratuit_qte": int(_num(row.get("promo_gratuit_qte"))),
+            "promo_remise_pct": _num(row.get("promo_remise_pct")),
+            "promo_texte": _clean(row.get("promo_texte")),
+        }
+        for sub in expand_multi_promos(base):
+            subgroups[key].produits.append(Product(
+                nom=_clean(row.get("nom")),
+                packshot_path=resolve(row.get("packshot")),
+                nom_image_path=resolve(row.get("nom_image")),
+                prix_gros=_num(row.get("prix_gros")),
+                prix_gros_net=_num(row.get("prix_gros_net")),
+                colisage=_clean(row.get("colisage")),
+                colisage_prix_gros=_num(row.get("colisage_prix_gros")),
+                colisage_prix_gros_net=_num(row.get("colisage_prix_gros_net")),
+                is_promo=bool(sub.get("is_promo")),
+                type_promo=str(sub.get("type_promo") or ""),
+                promo_achat_qte=int(sub.get("promo_achat_qte") or 0),
+                promo_gratuit_qte=int(sub.get("promo_gratuit_qte") or 0),
+                promo_remise_pct=float(sub.get("promo_remise_pct") or 0),
+                promo_texte=str(sub.get("promo_texte") or ""),
+                promo_carton_left=_bool(row.get("promo_carton_left")),
+                promo_carton_right=_bool(row.get("promo_carton_right")),
+                promo_ribbon_left=_bool(row.get("promo_ribbon_left")),
+                promo_ribbon_right=_bool(row.get("promo_ribbon_right")),
+                promo_carton_image=resolve(row.get("promo_carton_image")),
+                promo_ribbon_image=resolve(row.get("promo_ribbon_image")),
+                promo_remise_image=resolve(row.get("promo_remise_image")),
+                promo_gratuite_image=resolve(row.get("promo_gratuite_image")),
+                packshot_left=_num(row.get("packshot_left")),
+                packshot_top=_num(row.get("packshot_top")),
+                packshot_width=_num(row.get("packshot_width")),
+                packshot_height=_num(row.get("packshot_height")),
+            ))
 
     return deck

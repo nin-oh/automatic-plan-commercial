@@ -1,0 +1,115 @@
+.container {
+  background: var(--color-bg-card);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.toolbarLeft {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.tableWrapper {
+  overflow-x: auto;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--font-size-sm);
+}
+
+.th {
+  padding: 10px 12px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-inverse);
+  white-space: nowrap;
+  text-align: left;
+}
+
+.td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+}
+
+.row:hover {
+  background-color: var(--color-bg-hover);
+}
+
+.editable {
+  background-color: var(--color-bg-card);
+  cursor: pointer;
+  transition: background-color 120ms, box-shadow 120ms;
+}
+
+/* Each app sets its own --accent in its index.css; defaults to indigo
+ * (Amafin) so existing apps don't change. Plan Commercial overrides to
+ * orange. */
+.editable:hover {
+  background-color: color-mix(in srgb, var(--accent, #6366f1) 8%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent, #6366f1);
+}
+
+.readOnly {
+  background-color: #f0f4ff;
+}
+
+.newRow {
+  background-color: #fffde7;
+}
+
+.newRow .td {
+  padding: 4px 8px;
+}
+
+.deleteBtn {
+  background: none;
+  border: none;
+  color: var(--color-danger);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  opacity: 0.5;
+  transition: opacity var(--transition-fast);
+}
+
+.deleteBtn:hover {
+  opacity: 1;
+  background-color: #fde8e8;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-md);
+  border-top: 1px solid var(--color-border);
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2xl);
+}

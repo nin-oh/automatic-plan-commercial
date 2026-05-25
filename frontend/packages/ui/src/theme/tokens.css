@@ -1,0 +1,106 @@
+:root {
+  /* ── Colors ── */
+  --color-primary: #467ed9;
+  --color-primary-hover: #3568bf;
+  --color-secondary: #6c757d;
+  --color-secondary-hover: #565e64;
+  --color-success: #2ecc71;
+  --color-success-hover: #27ae60;
+  --color-danger: #e74c3c;
+  --color-danger-hover: #c0392b;
+  --color-warning: #f5a623;
+  --color-warning-hover: #e09500;
+  --color-info: #3498db;
+  --color-info-hover: #2980b9;
+
+  /* ── Surfaces ── */
+  --color-bg: #f6f7fb;
+  --color-bg-card: #ffffff;
+  --color-bg-sidebar: #142b38;
+  --color-bg-navbar: #dc3545;
+  --color-bg-input: #ffffff;
+  --color-bg-hover: #f0f0f0;
+  --color-bg-selected: #e8f0fe;
+
+  /* ── Text ── */
+  --color-text: #212529;
+  --color-text-secondary: #6c757d;
+  --color-text-inverse: #ffffff;
+  --color-text-link: #467ed9;
+  --color-text-success: #2ecc71;
+  --color-text-danger: #e74c3c;
+  --color-text-muted: #95a5a6;
+
+  /* ── Borders ── */
+  --color-border: #dee2e6;
+  --color-border-focus: #467ed9;
+
+  /* ── Table header colors (Amafin defaults, overridable per-table) ── */
+  --color-table-factures: #467ed9;
+  --color-table-payments: #dfddba;
+  --color-table-courant: #bebadf;
+  --color-table-effet: #d0dfba;
+  --color-table-finex: #dfbad9;
+
+  /* ── KPI card colors ── */
+  --color-card-blue: #467ed9;
+  --color-card-green: #2ecc71;
+  --color-card-purple: #9b59b6;
+  --color-card-red: #e74c3c;
+  --color-card-grey: #95a5a6;
+  --color-card-yellow: #f5a623;
+
+  /* ── Priority colors ── */
+  --color-priority-p0: #f8d7da;
+  --color-priority-p1: #e2e3e5;
+  --color-priority-p2: #fff3cd;
+
+  /* ── Spacing ── */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* ── Typography ── */
+  --font-family: 'Quicksand', 'Segoe UI', system-ui, sans-serif;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.25rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: 2rem;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --line-height: 1.5;
+
+  /* ── Borders ── */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-normal: 250ms ease;
+
+  /* ── Layout ── */
+  --sidebar-width: 270px;
+  --sidebar-collapsed: 70px;
+  --navbar-height: 56px;
+
+  /* ── Z-index ── */
+  --z-dropdown: 100;
+  --z-sidebar: 200;
+  --z-navbar: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+}

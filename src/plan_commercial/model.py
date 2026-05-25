@@ -24,6 +24,25 @@ class Product:
     packshot_top: float = 0.0
     packshot_width: float = 0.0
     packshot_height: float = 0.0
+    # Promo decoration toggles — both default OFF so a fresh promo slide is
+    # just the two packshots. Users opt in per-side via these flags. When a
+    # decoration is on:
+    #   - the carton is rendered BEHIND the packshot (packshot in front)
+    #   - the ribbon is rendered as a corner overlay on the bag
+    promo_carton_left: bool = False
+    promo_carton_right: bool = False
+    promo_ribbon_left: bool = False
+    promo_ribbon_right: bool = False
+    # Optional image overrides (empty → fall back to assets/builtin/default_*.png)
+    promo_carton_image: Optional[str] = None
+    promo_ribbon_image: Optional[str] = None
+    # Per-role product images. Sometimes the offered product on the right
+    # is a different SKU than the bought one on the left, and in
+    # `remise+gratuite` mode there can even be TWO distinct products on the
+    # right (one earning the discount, one given for free). Empty values
+    # fall back to `packshot_path` (the bought product).
+    promo_remise_image: Optional[str] = None     # product receiving the remise
+    promo_gratuite_image: Optional[str] = None   # product offered for free
 
 
 @dataclass

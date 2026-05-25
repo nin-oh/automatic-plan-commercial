@@ -1,9 +1,29 @@
-streamlit>=1.30
+# Core PPTX/Excel generation — used by the FastAPI backend and CLI.
 python-pptx>=1.0
 openpyxl>=3.1
 pandas>=2.0
 Pillow>=10.0
-streamlit-image-coordinates>=0.1.6
-nicegui>=2.0
-# CLI-only users can skip streamlit/nicegui/pandas and install only:
+
+# Plan Commercial — FastAPI backend behind the React frontend.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+pydantic>=2.7
+
+# Force a recent PyYAML so installs work on Python 3.13/3.14 — older versions
+# (<6.0.2) fail to compile against current Cython with:
+#   AttributeError: 'build_ext' object has no attribute 'cython_sources'
+PyYAML>=6.0.2
+
+# ─── Legacy Python UIs (Streamlit / NiceGUI) ────────────────────────────────
+# These were replaced by the React frontend (frontend/apps/plan-commercial).
+# They are NOT needed to run the app. Uncomment only if you want to use the
+# old `app.py` / `app_ng.py` instead. On Python 3.14 they may need
+# `pip install --pre streamlit nicegui` or sticking to Python 3.12.
+#
+# streamlit>=1.30
+# streamlit-image-coordinates>=0.1.6
+# nicegui>=2.0
+
+# CLI-only users can skip FastAPI and install only:
 #   python-pptx openpyxl Pillow

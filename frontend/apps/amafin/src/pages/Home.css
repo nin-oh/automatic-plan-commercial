@@ -1,0 +1,291 @@
+/* ══════════════════════════════════════════
+   HOME DASHBOARD — Premium Design
+   ══════════════════════════════════════════ */
+
+.home-dashboard {
+  padding: 24px 8px;
+}
+
+/* ── KPI Cards Row ── */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+/* ── Order Cards ── */
+.order-card {
+  border: none;
+  border-radius: 12px;
+  padding: 22px 24px;
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.3s ease;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.order-card::before {
+  content: '';
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.order-card::after {
+  content: '';
+  position: absolute;
+  bottom: -20px;
+  right: 30px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.order-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+}
+
+.order-card h5 {
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.9;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.order-card .card-value {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+
+.order-card .card-value small {
+  font-size: 0.65rem;
+  font-weight: 500;
+  opacity: 0.7;
+  margin-left: 4px;
+  letter-spacing: 0.5px;
+}
+
+/* Card Colors with subtle gradients */
+.bg-c-blue {
+  background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+  box-shadow: 0 4px 15px rgba(0, 123, 255, 0.3);
+}
+
+.bg-c-gris {
+  background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+  box-shadow: 0 4px 15px rgba(100, 100, 100, 0.25);
+}
+
+.bg-c-yellow {
+  background: linear-gradient(135deg, #ffa600 0%, #e08e00 100%);
+  box-shadow: 0 4px 15px rgba(255, 166, 0, 0.3);
+}
+
+.bg-c-purple {
+  background: linear-gradient(135deg, #6f42c1 0%, #563d7c 100%);
+  box-shadow: 0 4px 15px rgba(86, 61, 124, 0.3);
+}
+
+.bg-c-red {
+  background: linear-gradient(135deg, #ff4c4c 0%, #dc3545 100%);
+  box-shadow: 0 4px 15px rgba(255, 76, 76, 0.3);
+}
+
+.bg-c-green {
+  background: linear-gradient(135deg, #2ed8b6 0%, #1abc9c 100%);
+  box-shadow: 0 4px 15px rgba(46, 216, 182, 0.3);
+}
+
+/* ── Generic Card ── */
+.card {
+  background: #fff;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  margin-bottom: 20px;
+  transition: box-shadow 0.3s ease;
+  overflow: hidden;
+}
+
+.card:hover {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+}
+
+.card-header {
+  background: transparent;
+  padding: 16px 24px 8px;
+  border-bottom: none;
+}
+
+.card-header h4 {
+  margin: 0;
+  color: #2d3436;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+/* ── Charts Row ── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 0;
+}
+
+.chart-main,
+.chart-side {
+  min-width: 0; /* prevent grid blowout */
+}
+
+/* ── Chart Placeholder ── */
+.chart-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: #b2bec3;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 20px;
+}
+
+/* ── Top Achats Table ── */
+.top-achats-table {
+  padding: 0 20px 16px;
+  min-height: 375px;
+  display: flex;
+  flex-direction: column;
+}
+
+.top-achats-table table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.82rem;
+}
+
+.top-achats-table thead th {
+  background: linear-gradient(135deg, #6f42c1, #563d7c);
+  color: #fff;
+  text-align: center;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.top-achats-table thead th:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.top-achats-table thead th:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.top-achats-table tbody td {
+  border: none;
+  padding: 8px 12px;
+  text-align: center;
+  color: #555;
+}
+
+.top-achats-table tbody tr:hover {
+  background: #f8f9ff;
+}
+
+.top-achats-table .empty-row {
+  color: #b2bec3;
+  padding: 60px 0;
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
+.top-achats-table tfoot td {
+  padding: 12px;
+  border-top: 2px solid #eee;
+  text-align: center;
+  font-weight: 700;
+  color: #2d3436;
+}
+
+/* ── Bottom Row ── */
+.bottom-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 20px;
+}
+
+/* ── Ring Chart Cards ── */
+.ring-card-escompte,
+.ring-card-finex {
+  min-height: 400px;
+}
+
+.ring-card-escompte .ring-header,
+.ring-card-escompte .ring-placeholder {
+  background-color: #093FB4;
+  color: #fff;
+  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 20.5V18H0v-2h20v-2H0v-2h20v-2H0V8h20V6H0V4h20V2H0V0h22v20h2V0h2v20h2V0h2v20h2V0h2v20h2V0h2v20h2v2H20v-1.5zM0 20h2v20H0V20zm4 0h2v20H4V20zm4 0h2v20H8V20zm4 0h2v20h-2V20zm4 0h2v20h-2V20zm4 4h20v2H20v-2zm0 4h20v2H20v-2zm0 4h20v2H20v-2zm0 4h20v2H20v-2z' fill='%23ffffff' fill-opacity='0.08' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+
+.ring-card-finex .ring-header,
+.ring-card-finex .ring-placeholder {
+  background-color: #f8f9fa;
+  color: #2d3436;
+  background-image: url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M20 20.5V18H0v-2h20v-2H0v-2h20v-2H0V8h20V6H0V4h20V2H0V0h22v20h2V0h2v20h2V0h2v20h2V0h2v20h2V0h2v20h2v2H20v-1.5zM0 20h2v20H0V20zm4 0h2v20H4V20zm4 0h2v20H8V20zm4 0h2v20h-2V20zm4 0h2v20h-2V20zm4 4h20v2H20v-2zm0 4h20v2H20v-2zm0 4h20v2H20v-2zm0 4h20v2H20v-2z' fill='%23000000' fill-opacity='0.04' fill-rule='evenodd'/%3E%3C/svg%3E");
+}
+
+.ring-header {
+  padding: 20px 24px 0;
+}
+
+.ring-header h3 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+}
+
+.ring-placeholder {
+  aspect-ratio: 1 / 1;
+  max-width: 600px;
+  margin: 0 auto;
+  border-radius: 0 0 12px 12px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 1400px) {
+  .kpi-row {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1100px) {
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+  .bottom-row {
+    grid-template-columns: 1fr;
+  }
+  .kpi-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

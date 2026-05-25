@@ -5,6 +5,12 @@ Assets live in ``assets/images/`` (next to ``app.py``). A JSON sidecar
 (packshot / logo / badge / other), upload timestamp, and freeform tags.
 Metadata is updated lazily: any image file on disk without an entry gets
 one auto-created from its filename the first time it's listed.
+
+Subfolders are scanned recursively. The metadata key is the path relative to
+``assets/images/`` (with forward slashes, e.g. ``MIO/main_500.png``), so the
+same basename can appear in different folders without collision. Files that
+sit inside a subfolder inherit that subfolder's name as their brand — drop a
+file into ``images/MIO/`` and it's automatically tagged ``brand=MIO``.
 """
 from __future__ import annotations
 
@@ -93,6 +99,8 @@ def _metadata_path(image_dir: Path) -> Path:
 def load_metadata(image_dir: Path) -> Dict[str, AssetMeta]:
     """Load the metadata map; reconcile with files actually on disk.
 
+    - Walks ``image_dir`` recursively; the relative path with forward slashes
+      becomes the metadata key (e.g. ``MIO/main_500.png``).
     - Drops metadata entries whose file is gone.
     - Adds auto-inferred entries for files that have no entry yet.
     """
@@ -105,18 +113,22 @@ def load_metadata(image_dir: Path) -> Dict[str, AssetMeta]:
         except (OSError, json.JSONDecodeError):
             raw = {}
 
-    on_disk = {
-        p.name for p in image_dir.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTS
-    }
-    result: Dict[str, AssetMeta] = {}
+    on_disk: Dict[str, Path] = {}
+    for p in image_dir.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        if p.name == METADATA_FILENAME:
+            continue
+        rel = p.relative_to(image_dir).as_posix()
+        on_disk[rel] = p
 
-    for name in on_disk:
+    result: Dict[str, AssetMeta] = {}
+    for name, path in on_disk.items():
         entry = raw.get(name)
         if entry:
             result[name] = AssetMeta.from_dict(name, entry)
         else:
-            result[name] = _auto_meta(image_dir / name)
+            result[name] = _auto_meta(path, rel_name=name)
 
     # If anything changed (added or pruned), persist it.
     if set(raw) != set(result):
@@ -132,12 +144,21 @@ def save_metadata(image_dir: Path, meta: Dict[str, AssetMeta]) -> None:
     )
 
 
-def _auto_meta(path: Path) -> AssetMeta:
+def _auto_meta(path: Path, rel_name: Optional[str] = None) -> AssetMeta:
+    """`rel_name` is the path relative to image_dir (forward slashes). When the
+    file lives in a subfolder, that folder name becomes the brand — exactly
+    what the user gets by dropping a file into ``images/MIO/``."""
     st = path.stat()
+    name = rel_name if rel_name is not None else path.name
+    if "/" in name:
+        # Use the topmost subfolder as the brand (e.g. "MIO/Pdr/foo.png" -> MIO).
+        brand = name.split("/", 1)[0].upper().strip()
+    else:
+        brand = infer_brand(name)
     return AssetMeta(
-        filename=path.name,
-        brand=infer_brand(path.name),
-        type=infer_type(path.name),
+        filename=name,
+        brand=brand,
+        type=infer_type(name),
         added=datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
         size=st.st_size,
     )
@@ -146,12 +167,16 @@ def _auto_meta(path: Path) -> AssetMeta:
 def register_upload(image_dir: Path, filename: str, data: bytes,
                     brand: Optional[str] = None,
                     type_: Optional[str] = None) -> AssetMeta:
-    """Write `data` to image_dir/filename and update the metadata store."""
+    """Write `data` to image_dir/filename and update the metadata store.
+
+    `filename` may include forward slashes to land the file inside a subfolder
+    (which then drives brand inference)."""
     target = image_dir / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
 
     meta = load_metadata(image_dir)
-    entry = meta.get(filename) or _auto_meta(target)
+    entry = meta.get(filename) or _auto_meta(target, rel_name=filename)
     if brand is not None:
         entry.brand = brand
     if type_ is not None:
@@ -160,20 +185,73 @@ def register_upload(image_dir: Path, filename: str, data: bytes,
     entry.size = target.stat().st_size
     meta[filename] = entry
     save_metadata(image_dir, meta)
+    _BASENAME_INDEX.pop(image_dir, None)
     return entry
 
 
 def delete_asset(image_dir: Path, filename: str) -> bool:
     path = image_dir / filename
     removed = False
-    if path.exists():
+    if path.exists() and path.is_file():
         path.unlink()
         removed = True
     meta = load_metadata(image_dir)
     if filename in meta:
         meta.pop(filename)
         save_metadata(image_dir, meta)
+    _BASENAME_INDEX.pop(image_dir, None)
     return removed
+
+
+# --- Basename index --------------------------------------------------------
+#
+# When the user moves files into subfolders (e.g. ``MIO/foo.png``) but the
+# Excel still references the bare filename (``foo.png``), the resolver needs
+# to find the file anywhere in the tree. We keep a per-image_dir basename →
+# relative-path map, refreshed lazily and invalidated on uploads/deletes.
+
+_BASENAME_INDEX: Dict[Path, Dict[str, str]] = {}
+
+
+def _build_basename_index(image_dir: Path) -> Dict[str, str]:
+    idx: Dict[str, str] = {}
+    if not image_dir.exists():
+        return idx
+    for p in image_dir.rglob("*"):
+        if not p.is_file() or p.suffix.lower() not in IMAGE_EXTS:
+            continue
+        if p.name == METADATA_FILENAME:
+            continue
+        # First match wins — top-level files take priority over subfolder
+        # duplicates so an explicit override at the root keeps working.
+        idx.setdefault(p.name, p.relative_to(image_dir).as_posix())
+    return idx
+
+
+def find_relative_path(image_dir: Path, name: str) -> Optional[str]:
+    """Resolve a filename — possibly bare — to its path relative to image_dir.
+
+    Tries an exact path first (so ``MIO/foo.png`` keeps working), then falls
+    back to a basename lookup (so old Excel files referencing ``foo.png``
+    still resolve once the file is moved into a subfolder)."""
+    if not name:
+        return None
+    direct = image_dir / name
+    if direct.is_file():
+        return name
+    if "/" in name or "\\" in name:
+        return None
+    cache = _BASENAME_INDEX.get(image_dir)
+    if cache is None:
+        cache = _build_basename_index(image_dir)
+        _BASENAME_INDEX[image_dir] = cache
+    hit = cache.get(name)
+    if hit:
+        return hit
+    # Cache miss could mean a stale index — rebuild once and retry.
+    cache = _build_basename_index(image_dir)
+    _BASENAME_INDEX[image_dir] = cache
+    return cache.get(name)
 
 
 # --- Querying ---------------------------------------------------------------

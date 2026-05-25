@@ -1,0 +1,54 @@
+# Plan Commercial — single-container compose file.
+#
+# Brings up the FastAPI server (which also serves the built React UI) on
+# port 8000 with persistent volumes for the user's uploaded images and the
+# generated archive.
+#
+#   docker compose up -d --build       # build + start in the background
+#   docker compose logs -f app         # follow logs
+#   docker compose down                # stop (volumes persist)
+#   docker compose down -v             # stop AND delete user data — careful
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: plan-commercial:latest
+    container_name: plan-commercial
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # The container's session.py reads this and uses it as the root for
+      # state.db + images/ + archive/ — one mount point covers everything.
+      # Almost never needs changing; override via .env if you do.
+      PC_DATA_DIR: ${PC_DATA_DIR:-/app/data}
+    volumes:
+      # Single persistent volume: state.db (current deck), images/ (user-
+      # uploaded packshots & logos), archive/ (generated decks).
+      #
+      # PC_DATA_HOST controls the *host* side of this mount. Defaults to the
+      # named Docker volume `pc_data`; override in .env to a real path
+      # (e.g. PC_DATA_HOST=D:/plan_commercial_data) to keep your data in a
+      # browsable host folder instead of inside Docker's storage.
+      #
+      # Built-in graphics live under /app/assets/builtin in the image and
+      # are NOT a volume — they ship with the image and update with releases.
+      - ${PC_DATA_HOST:-pc_data}:${PC_DATA_DIR:-/app/data}
+    # Useful for SAP — if the warehouse only accepts the docker host's IP,
+    # uncomment one of these. `host` lets the container reach 192.168.x
+    # addresses directly via the host's network stack.
+    # network_mode: host
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  # Only declared when PC_DATA_HOST is unset (the default). When the user
+  # sets PC_DATA_HOST to a real path, Compose binds that path instead and
+  # this named volume goes unused — harmless.
+  pc_data:

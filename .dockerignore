@@ -1,0 +1,48 @@
+# Build artefacts — re-built inside the container
+**/node_modules
+**/dist
+frontend/.turbo
+frontend/.vite
+
+# Python local state — never ship the host's venv or caches
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+.venv
+venv
+env
+
+# Editor / OS clutter
+.vscode
+.idea
+*.swp
+.DS_Store
+Thumbs.db
+
+# Git is unnecessary for the build context
+.git
+.gitignore
+
+# User-generated data — these live in volumes at runtime, not in the image.
+# Keep `assets/builtin/` (built-in graphics shipped with the app); strip
+# `assets/images/` (uploaded packshots) and the on-disk session.
+assets/images/
+assets/session.json
+archive/
+
+# Legacy Streamlit / NiceGUI / CLI scripts not used by the FastAPI service
+app.py
+app_ng.py
+generate_deck.py
+product_layer.py
+stable_layer.py
+
+# Windows launcher scripts (irrelevant inside a Linux container)
+*.bat
+run.sh
+run_ng.sh
+
+# Docs / sidecars
+*.md
+!README.md

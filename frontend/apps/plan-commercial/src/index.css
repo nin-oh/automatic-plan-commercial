@@ -1,0 +1,83 @@
+/* ══════════════════════════════════════════════════════════
+   Plan Commercial — global styles
+   The visual language matches Amafin (we share @amafin/ui), but the
+   accent palette is warm (orange → red) so the app feels distinct.
+   ══════════════════════════════════════════════════════════ */
+
+:root {
+  --pc-accent:    #f97316;
+  --pc-accent-2:  #dc2626;
+  --pc-accent-soft: rgba(249, 115, 22, 0.15);
+
+  /* Generic accent picked up by shared @amafin/ui components (SmartTable
+   * editable-cell hover, BrandButton primary gradient, etc.). Setting these
+   * here means the shared components light up in Plan Commercial's orange
+   * instead of the default indigo, without forking the components. */
+  --accent:  var(--pc-accent);
+  --accent2: var(--pc-accent-2);
+
+  --bg:            #fafafa;
+  --bg-muted:      #f4f4f5;
+  --surface:       #ffffff;
+  --border:        #e4e4e7;
+
+  --text:          #18181b;
+  --text-muted:    #52525b;
+  --text-soft:     #a1a1aa;
+
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Menlo, Consolas, monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root { min-height: 100%; }
+
+body {
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+button, input, select, textarea { font: inherit; }
+button { background: none; cursor: pointer; }
+a { color: inherit; text-decoration: none; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+  border-radius: 10px;
+  border: 2px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: #a1a1aa; }
+
+/* SmartTable + other @amafin/ui organisms still use a few legacy class names.
+ * Keep the rules they need, themed for the dark surface. */
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 8px 14px; height: 34px;
+  border: 1px solid transparent; border-radius: 8px;
+  font-size: 13px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+  transition: transform 120ms, box-shadow 200ms, background 120ms, border-color 120ms;
+}
+.button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--pc-accent-soft); }
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
+.button--primary {
+  background: linear-gradient(135deg, var(--pc-accent), var(--pc-accent-2));
+  color: #fff; border: none;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.4);
+}
+.button--primary:hover:not(:disabled) { transform: translateY(-1px); }
+.button--secondary {
+  background: #fff; color: var(--text); border-color: var(--border);
+}
+.button--sm { padding: 5px 10px; height: 28px; font-size: 12px; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }

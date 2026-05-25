@@ -1,0 +1,11 @@
+.content {
+  margin-left: 270px;
+  padding: 54px 24px 24px;
+  min-height: 100vh;
+  background-color: #f0f2f5;
+  transition: margin-left 0.3s ease;
+}
+
+.content.collapsed {
+  margin-left: 70px;
+}

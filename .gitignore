@@ -1,22 +1,59 @@
+# ─── Python ────────────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
 venv/
 .env
+.env.local
 
-# Generated outputs
+# ─── Node / frontend ───────────────────────────────────────────────────────
+# `node_modules` is huge and re-installable via `pnpm install`. NEVER commit.
+**/node_modules/
+**/dist/
+**/.turbo/
+**/.vite/
+*.tsbuildinfo
+
+# ─── Generated / temp outputs ──────────────────────────────────────────────
 out/
 *.pptx.bak
+*.xlsx.bak
 ~$*.pptx
 ~$*.xlsx
+# Scratch from profile_generate.py
+_profile_out.pptx
+test.png
+test.pdf
+test.pptx
 
-# Local user content — never committed
+# ─── Local user data (lives in PC_DATA_DIR for new installs) ───────────────
 assets/images/
+assets/session.json
+assets/state.db
+assets/state.db-journal
+assets/state.db-wal
+assets/state.db-shm
+# Leftover dirs from earlier asset-extraction experiments — not used by the
+# running app. Re-creatable by running `api/extract_assets.py` if needed.
+assets/extracted/
+assets/stable/
+
+# Generated decks: keep the parent folder structure but exclude content
 archive/*/
 !archive/.gitkeep
 
-# IDE
+# ─── Heavy samples ─────────────────────────────────────────────────────────
+# The MIO Détail intro PPTX is 67 MB and the canal-gros export ~70 MB.
+# GitHub warns above 50 MB and rejects above 100 MB. Distribute these
+# separately (shared drive, release artefact, etc.).
+samples/Presentation1.pptx
+samples/Plan commercial Gros Avril*.pptx
+samples/Plan commercial Gros Avril little.pptx
+
+# ─── IDE / OS ──────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 .DS_Store
+Thumbs.db
+*.swp

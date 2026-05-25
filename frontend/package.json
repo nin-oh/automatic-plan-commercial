@@ -1,0 +1,12 @@
+{
+  "name": "amafin-frontend",
+  "private": true,
+  "scripts": {
+    "dev:ui": "pnpm --filter @amafin/ui dev",
+    "dev:app": "pnpm --filter @amafin/app dev",
+    "dev": "pnpm run --parallel dev:ui dev:app",
+    "build:ui": "pnpm --filter @amafin/ui build",
+    "build:app": "pnpm --filter @amafin/app build",
+    "build": "pnpm run build:ui && pnpm run build:app"
+  }
+}

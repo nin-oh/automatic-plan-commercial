@@ -1,0 +1,191 @@
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  width: 270px;
+  background: linear-gradient(180deg, #0f2027 0%, #142b38 40%, #1a3a4a 100%);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  transition: width 0.3s ease;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.1) transparent;
+}
+
+.sidebar.collapsed {
+  width: 70px;
+}
+
+/* ── Brand / Logo ── */
+.brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 16px;
+  min-height: 90px;
+}
+
+.brand img {
+  max-height: 70px;
+  transition: all 0.3s ease;
+}
+
+.collapsed .brand img {
+  opacity: 0;
+  max-height: 0;
+  padding: 0;
+}
+
+.brandText {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 0.3s ease;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.collapsed .brandText {
+  opacity: 0;
+  width: 0;
+}
+
+/* ── Toggle Button ── */
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 12px 12px;
+}
+
+.toggleBtn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 1.1rem;
+  transition: all 0.2s;
+}
+
+.toggleBtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* ── Navigation ── */
+.nav {
+  flex: 1;
+  padding: 4px 0 20px;
+  list-style: none;
+  margin: 0;
+}
+
+.sectionTitle {
+  padding: 24px 20px 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: rgba(255, 255, 255, 0.3);
+  white-space: nowrap;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.collapsed .sectionTitle {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+}
+
+/* ── Nav Items ── */
+.navItem {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  height: 44px;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  margin: 1px 0;
+  border-radius: 0;
+  position: relative;
+}
+
+.navItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.navItem.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.navItem.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  background: #467ed9;
+  border-radius: 0 3px 3px 0;
+}
+
+.navIcon {
+  font-size: 1.25rem;
+  min-width: 24px;
+  text-align: center;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.8;
+  transition: all 0.2s ease;
+}
+
+.navItem:hover .navIcon,
+.navItem.active .navIcon {
+  opacity: 1;
+}
+
+.navLabel {
+  margin-left: 14px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.collapsed .navLabel {
+  opacity: 0;
+  width: 0;
+  margin-left: 0;
+}
+
+.collapsed .navItem {
+  justify-content: center;
+  padding: 0;
+}
+
+.collapsed .navIcon {
+  font-size: 1.6rem;
+}
