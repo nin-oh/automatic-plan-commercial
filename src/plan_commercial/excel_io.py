@@ -13,8 +13,14 @@ from .promo_split import expand_multi_promos
 
 PRODUIT_COLS = [
     "groupe", "sous_groupe", "nom",
-    "packshot", "nom_image",
+    "item_code",                  # SAP ItemCode, primary key for SAP verification
+    # packshot = hero scent; packshot2-6 = the other scents shown beside it
+    # on the same slide. Without these the scents were silently dropped on
+    # an export -> re-import round trip.
+    "packshot", "packshot2", "packshot3", "packshot4", "packshot5", "packshot6",
+    "nom_image",
     "prix_gros", "prix_gros_net",
+    "prix_detail", "prix_detail_net",
     "colisage", "colisage_prix_gros", "colisage_prix_gros_net",
     "logo_groupe",
     # Promo fields
@@ -26,6 +32,10 @@ PRODUIT_COLS = [
     "promo_ribbon_left", "promo_ribbon_right",
     "promo_carton_image", "promo_ribbon_image",
     "promo_remise_image", "promo_gratuite_image",
+    "promo_gratuite_image_2", "promo_gratuite_image_3", "promo_gratuite_image_4",
+    # Which SKU each gratuite slot hands out — captioned on the slide.
+    "promo_gratuite_nom", "promo_gratuite_nom_2",
+    "promo_gratuite_nom_3", "promo_gratuite_nom_4",
     # Packshot position overrides (inches; 0 = use default)
     "packshot_left", "packshot_top", "packshot_width", "packshot_height",
 ]
@@ -50,8 +60,13 @@ _SECTION_COLOR = {
 # Column -> section mapping (for the grouped header above the column names)
 _COL_TO_SECTION = {
     "groupe": "Identification", "sous_groupe": "Identification",
-    "nom": "Identification", "packshot": "Identification", "nom_image": "Identification",
+    "nom": "Identification", "item_code": "Identification",
+    "packshot": "Identification", "nom_image": "Identification",
+    "packshot2": "Identification", "packshot3": "Identification",
+    "packshot4": "Identification", "packshot5": "Identification",
+    "packshot6": "Identification",
     "prix_gros": "Prix à l'unité", "prix_gros_net": "Prix à l'unité",
+    "prix_detail": "Prix à l'unité", "prix_detail_net": "Prix à l'unité",
     "colisage": "Prix à la caisse",
     "colisage_prix_gros": "Prix à la caisse",
     "colisage_prix_gros_net": "Prix à la caisse",
@@ -63,6 +78,7 @@ _COL_TO_SECTION = {
 
 # Columns that should be right-aligned / number-formatted as prices
 _PRICE_COLS = {"prix_gros", "prix_gros_net",
+               "prix_detail", "prix_detail_net",
                "colisage_prix_gros", "colisage_prix_gros_net"}
 _INT_COLS   = {"promo_achat_qte", "promo_gratuit_qte"}
 _PCT_COLS   = {"promo_remise_pct"}
@@ -245,16 +261,35 @@ def write_template(output_path: Optional[str] = None,
             for c_idx in range(1, n_cols + 1):
                 ws.cell(row=r_idx, column=c_idx).fill = PatternFill("solid", fgColor=_ROSE)
 
-    # Column widths
+    # Column widths — keyed by name so the dict survives PRODUIT_COLS
+    # reordering (the old letter-keyed version got stale every time a
+    # column moved). Default is what openpyxl chooses; missing entries
+    # stay default.
+    width_by_name = {
+        "groupe":                 14,
+        "sous_groupe":            16,
+        "nom":                    36,
+        "item_code":              14,
+        "packshot":               26,
+        "nom_image":              22,
+        "prix_gros":              12,
+        "prix_gros_net":          14,
+        "prix_detail":            12,
+        "prix_detail_net":        14,
+        "colisage":               14,
+        "colisage_prix_gros":     12,
+        "colisage_prix_gros_net": 14,
+        "logo_groupe":            22,
+        "is_promo":               10,
+        "type_promo":             17,
+        "promo_achat_qte":        12,
+        "promo_gratuit_qte":      13,
+        "promo_remise_pct":       11,
+        "promo_texte":            28,
+    }
     widths = {
-        "A": 14, "B": 16, "C": 36,
-        "D": 26, "E": 22,
-        "F": 12, "G": 14,
-        "H": 14, "I": 12, "J": 14,
-        "K": 22,
-        "L": 10, "M": 17,
-        "N": 12, "O": 13, "P": 11,
-        "Q": 28,
+        get_column_letter(PRODUIT_COLS.index(name) + 1): w
+        for name, w in width_by_name.items() if name in PRODUIT_COLS
     }
     _apply_column_widths(ws, widths)
 
@@ -364,6 +399,8 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
         titre=meta_kv.get("titre", "Plan Commercial") or "Plan Commercial",
         canal=meta_kv.get("canal", "Canal Gros") or "Canal Gros",
         mois=meta_kv.get("mois", ""),
+        nouveau_lancement=str(meta_kv.get("nouveau_lancement", "")).strip().lower()
+        in ("1", "true", "vrai", "oui"),
     )
 
     def resolve(name: str) -> Optional[str]:
@@ -403,10 +440,21 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
         for sub in expand_multi_promos(base):
             subgroups[key].produits.append(Product(
                 nom=_clean(row.get("nom")),
+                # Accept either the legacy lowercase header or SAP's "ItemCode"
+                # casing — the read_excel auto-detect uses pandas which keeps
+                # the original casing. Try the explicit field first, then SAP.
+                item_code=_clean(row.get("item_code") or row.get("ItemCode")),
                 packshot_path=resolve(row.get("packshot")),
+                packshot2_path=resolve(row.get("packshot2")),
+                packshot3_path=resolve(row.get("packshot3")),
+                packshot4_path=resolve(row.get("packshot4")),
+                packshot5_path=resolve(row.get("packshot5")),
+                packshot6_path=resolve(row.get("packshot6")),
                 nom_image_path=resolve(row.get("nom_image")),
                 prix_gros=_num(row.get("prix_gros")),
                 prix_gros_net=_num(row.get("prix_gros_net")),
+                prix_detail=_num(row.get("prix_detail") or row.get("DETAIL")),
+                prix_detail_net=_num(row.get("prix_detail_net") or row.get("DETAIL NET")),
                 colisage=_clean(row.get("colisage")),
                 colisage_prix_gros=_num(row.get("colisage_prix_gros")),
                 colisage_prix_gros_net=_num(row.get("colisage_prix_gros_net")),
@@ -416,6 +464,9 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
                 promo_gratuit_qte=int(sub.get("promo_gratuit_qte") or 0),
                 promo_remise_pct=float(sub.get("promo_remise_pct") or 0),
                 promo_texte=str(sub.get("promo_texte") or ""),
+                # Per-row container word ("sac"/"carton"/"caisse"/"unité") —
+                # without it the promo wording falls back to the channel default.
+                promo_unit=_clean(row.get("promo_unit")),
                 promo_carton_left=_bool(row.get("promo_carton_left")),
                 promo_carton_right=_bool(row.get("promo_carton_right")),
                 promo_ribbon_left=_bool(row.get("promo_ribbon_left")),
@@ -424,6 +475,13 @@ def read_excel(source, image_resolver: Optional[Callable[[str], Optional[str]]] 
                 promo_ribbon_image=resolve(row.get("promo_ribbon_image")),
                 promo_remise_image=resolve(row.get("promo_remise_image")),
                 promo_gratuite_image=resolve(row.get("promo_gratuite_image")),
+                promo_gratuite_image_2=resolve(row.get("promo_gratuite_image_2")),
+                promo_gratuite_image_3=resolve(row.get("promo_gratuite_image_3")),
+                promo_gratuite_image_4=resolve(row.get("promo_gratuite_image_4")),
+                promo_gratuite_nom=_clean(row.get("promo_gratuite_nom")),
+                promo_gratuite_nom_2=_clean(row.get("promo_gratuite_nom_2")),
+                promo_gratuite_nom_3=_clean(row.get("promo_gratuite_nom_3")),
+                promo_gratuite_nom_4=_clean(row.get("promo_gratuite_nom_4")),
                 packshot_left=_num(row.get("packshot_left")),
                 packshot_top=_num(row.get("packshot_top")),
                 packshot_width=_num(row.get("packshot_width")),

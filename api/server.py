@@ -26,7 +26,10 @@ from fastapi.staticfiles import StaticFiles
 # resolve regardless of where uvicorn is launched from.
 from . import deps  # noqa: F401  (import-time side effect)
 from .session import IMAGE_DIR, PROJECT_ROOT
-from .routes import archive, generate, images, preview, products, sap, state
+from .routes import (
+    archive, generate, images, preview, products, projects, sap, snapshots,
+    state,
+)
 
 FRONTEND_DIST = PROJECT_ROOT / "frontend" / "apps" / "plan-commercial" / "dist"
 
@@ -59,6 +62,17 @@ app.include_router(preview.router)
 app.include_router(generate.router)
 app.include_router(archive.router)
 app.include_router(sap.router)
+app.include_router(snapshots.router)
+app.include_router(projects.router)
+
+
+@app.on_event("startup")
+def _sap_warm_cache():
+    """Sync SAP into the in-process cache once at boot so the SAP page
+    serves data instantly without the user clicking anything. Silent on
+    failure — the user can still hit /sap/sync manually, and the rest of
+    the app must stay usable when SAP is unreachable."""
+    sap.init_cache_silently()
 
 
 @app.get("/api/health")

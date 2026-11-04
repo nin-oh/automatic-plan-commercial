@@ -22,6 +22,7 @@ export function SmartTable({
   onCellEdit,
   onRowAdd,
   onRowDelete,
+  onRowClick,
   searchable = true,
   sortable = true,
   paginated = true,
@@ -139,6 +140,7 @@ export function SmartTable({
         <table className={styles.table}>
           <thead>
             <tr style={{ backgroundColor: headerColor }}>
+              {onRowClick && <th className={styles.th} style={{ backgroundColor: headerColor, width: 40 }} />}
               {visibleColumns.map((col) =>
                 sortable ? (
                   <SortHeader
@@ -161,6 +163,7 @@ export function SmartTable({
             {/* New row form */}
             {showNewRow && (
               <tr className={styles.newRow}>
+                {onRowClick && <td />}
                 {visibleColumns.map((col) => (
                   <td key={col.key} className={styles.td}>
                     <EditableCell
@@ -184,7 +187,7 @@ export function SmartTable({
             {/* Data rows */}
             {pageData.length === 0 ? (
               <tr>
-                <td colSpan={visibleColumns.length + (onRowDelete ? 1 : 0)}>
+                <td colSpan={visibleColumns.length + (onRowDelete ? 1 : 0) + (onRowClick ? 1 : 0)}>
                   <EmptyState message="Aucune donnée trouvée" />
                 </td>
               </tr>
@@ -193,6 +196,25 @@ export function SmartTable({
                 const rowId = row[idField];
                 return (
                   <tr key={String(rowId)} className={styles.row}>
+                    {/* Explicit "open" button — a whole-row click handler
+                        used to swallow the first click of the cell editors,
+                        making inline editing impossible. */}
+                    {onRowClick && (
+                      <td className={styles.td} style={{ width: 40, textAlign: 'center' }}>
+                        <button
+                          onClick={() => onRowClick(rowId as string | number)}
+                          title="Ouvrir dans l'éditeur"
+                          style={{
+                            width: 26, height: 26, borderRadius: 6,
+                            border: '1px solid #e4e4e7', background: '#fff',
+                            cursor: 'pointer', fontSize: 13, lineHeight: 1,
+                            color: '#52525b', padding: 0,
+                          }}
+                        >
+                          ↗
+                        </button>
+                      </td>
+                    )}
                     {visibleColumns.map((col) => (
                       <td
                         key={col.key}

@@ -34,18 +34,45 @@ docker compose down -v         # stop AND wipe images + archive volumes
 
 ## Persistent data
 
-One mount point holds everything user-modifiable. The default uses a named
-Docker volume, but it's overridable via `.env`:
+One mount point holds everything user-modifiable. **By default, Docker
+creates a `data/` folder next to `docker-compose.yml`** — browsable in
+File Explorer, identical on every developer's machine, no configuration
+required:
+
+```
+your-project-folder/
+├── docker-compose.yml
+├── Dockerfile
+└── data/                       ← auto-created by Docker on first `up`
+    ├── images/                 ← user-uploaded packshots
+    ├── archive/                ← generated .pptx / .pdf / sidecar .xlsx
+    └── state.db                ← SQLite: current deck state
+```
+
+Inside the container the same content sits at `/app/data` — the env var
+`PC_DATA_DIR=/app/data` points `session.py` and the routes at it. Built-in
+graphics ship at `/app/assets/builtin/` (not a volume) so they update with
+each release.
+
+### Customising where data lives
 
 | Setting | Default | Override (in `.env`) |
 |---|---|---|
+| Host side | `./data` (next to docker-compose.yml) | `PC_DATA_HOST=C:/plan_commercial` etc. |
 | Container path | `/app/data` | `PC_DATA_DIR=/app/data` (rarely changed) |
-| Host side | Named volume `pc_data` | `PC_DATA_HOST=D:/plan_commercial_data` |
 
-Inside the container, `state.db` (current deck), `images/` (user uploads),
-and `archive/` (generated decks) all live under `$PC_DATA_DIR`. Built-in
-graphics ship at `/app/assets/builtin/` inside the image (not a volume),
-so they update with each release.
+Three useful host-side values:
+
+```ini
+# .env
+
+PC_DATA_HOST=./data                   # default — next to project
+PC_DATA_HOST=C:/plan_commercial       # fixed Windows path outside the repo
+PC_DATA_HOST=pc_data                  # Docker-managed named volume (opaque)
+```
+
+Switching from one to another doesn't migrate the data — copy the contents
+over yourself if you want to keep the existing deck.
 
 ### Configuring via `.env`
 

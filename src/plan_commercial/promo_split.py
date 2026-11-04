@@ -23,12 +23,23 @@ from typing import Any, Dict, Iterator, List
 
 
 _ARROW = re.compile(r"->|→|=>")
-_BUY_QTY = re.compile(r"(\d+)\s*(?:cs|caisse[s]?|carton[s]?|u\b|unit[eé]s?)", re.IGNORECASE)
+_BUY_QTY = re.compile(
+    r"(\d+)\s*(?:cs|caisse[s]?|carton[s]?|sac[s]?|u\b|unit[eé]s?)",
+    re.IGNORECASE,
+)
 _PCT = re.compile(r"(\d+(?:[.,]\d+)?)\s*%")
-# Strip "<price> per u" before searching for free units, so a price-per-unit
-# remise (`4u -> 7.70 per u`) doesn't get mistaken for a gratuite.
-_PER_UNIT_PRICE = re.compile(r"\d+(?:[.,]\d+)?\s*per\s*u\b", re.IGNORECASE)
-_FREE_UNITS = re.compile(r"(\d+)\s*u\b", re.IGNORECASE)
+# Strip "<price> per u" / "<price> DH l'unité" before searching for free
+# units, so a price-per-unit remise (`4u -> 7.70 per u`) doesn't get
+# mistaken for a gratuite.
+_PER_UNIT_PRICE = re.compile(
+    r"\d+(?:[.,]\d+)?\s*(?:per\s*u\b|dh\s*l['’]?\s*unit[eé])",
+    re.IGNORECASE,
+)
+# `2u`, `2 unités`, `1 Gratuite`, `2 offertes` — all mean N free items.
+_FREE_UNITS = re.compile(
+    r"(\d+)\s*(?:u\b|unit[eé]s?\b|gratuit(?:e)?s?\b|offert(?:e)?s?\b)",
+    re.IGNORECASE,
+)
 
 
 def split_promo_text(text: Any) -> List[str]:

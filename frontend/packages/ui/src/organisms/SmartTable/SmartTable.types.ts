@@ -20,6 +20,10 @@ export interface SmartTableProps {
   onRowAdd?: (row: Record<string, unknown>) => Promise<unknown>;
   /** Called when user deletes a row */
   onRowDelete?: (id: ID) => Promise<void>;
+  /** Adds a leading "↗" button on each row that fires with the row id —
+   *  used to jump to a detail editor. Deliberately NOT a whole-row click
+   *  handler: that would swallow the clicks meant for inline cell editing. */
+  onRowClick?: (id: ID) => void;
 
   /** Enable search bar */
   searchable?: boolean;

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, RotateCcw, Library, Upload, Loader2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, RotateCcw, Library, Upload, Loader2, X } from 'lucide-react';
 import { ImagePicker, type ImageAsset } from '../../molecules/ImagePicker';
 import { PackshotHandle, type PackshotRect } from './PackshotHandle';
 
@@ -8,6 +8,16 @@ export interface SlideProductRow {
   sous_groupe: string;
   nom: string;
   packshot: string;
+  /** Optional 2nd-scent packshot — when set, the slide shows both bottles
+   *  overlapping (one diapo, two parfums). */
+  packshot2: string;
+  /** Scents 3-6. From three scents up the slide switches to "hero + row":
+   *  `packshot` stays full size and the rest render smaller beside it, so
+   *  the whole range of a SKU is visible on one diapo. */
+  packshot3?: string;
+  packshot4?: string;
+  packshot5?: string;
+  packshot6?: string;
   logo_groupe: string;
   prix_gros: number;
   prix_gros_net: number;
@@ -36,6 +46,26 @@ export interface SlideProductRow {
    *  remise+gratuite has two distinct products on the right). */
   promo_remise_image: string;
   promo_gratuite_image: string;
+  /** Up to 3 additional "free" SKUs for a multi-item gratuite promo
+   *  (e.g. "Pour 16 caisses → 1 MIO MAIN 215 + 2 MIO 500g"). Empty
+   *  slots are ignored. The renderer subdivides the right-pack zone
+   *  into one cell per non-empty slot — see generator._gratuite_subzones. */
+  promo_gratuite_image_2?: string;
+  promo_gratuite_image_3?: string;
+  promo_gratuite_image_4?: string;
+  /** Which SKU each gratuite slot hands out. Captioned on the slide next
+   *  to the quantity ("1 unité Gratuite : MIO Pâte 1kg") — the photo alone
+   *  left sellers guessing what the free item actually was. */
+  promo_gratuite_nom?: string;
+  promo_gratuite_nom_2?: string;
+  promo_gratuite_nom_3?: string;
+  promo_gratuite_nom_4?: string;
+  /** Per-row override for the promo container word. Empty = use deck
+   *  channel default (Gros → "caisse", Détail → "unité"). Accepted
+   *  values: "", "sac", "carton", "caisse", "colis", "palette", "unité".
+   *  Mirrors the
+   *  backend's `Product.promo_unit` field. */
+  promo_unit?: string;
   packshot_left: number;
   packshot_top: number;
   packshot_width: number;
@@ -46,6 +76,11 @@ export interface SlideEditorProps {
   index: number;
   total: number;
   row: SlideProductRow;
+  /** Deck channel string ("Gros" / "Détail" / legacy "Canal Gros" etc.).
+   *  Used to label the promo qty fields ("Acheter N caisses" vs
+   *  "Acheter N unités") and to default the `promo_unit` select. The
+   *  per-row override on `row.promo_unit` wins when set. */
+  canal?: string;
   previewUrl: string;
   resolveImageUrl: (filename: string) => string;
   packshots: ImageAsset[];
@@ -56,6 +91,8 @@ export interface SlideEditorProps {
   onPlacePackshot: (xNorm: number, yNorm: number) => void;
   onResetPosition: () => void;
   onUploadPackshot: (file: File) => void;
+  /** Optional upload for the 2nd-scent packshot. Falls back to onUploadPackshot. */
+  onUploadPackshot2?: (file: File) => void;
   onUploadBrandLogo: (file: File) => void;
   onPickPackshot: (filename: string) => void;
   onPickBrandLogo: (filename: string) => void;
@@ -79,17 +116,45 @@ export interface SlideEditorProps {
 /** Live preview with click-to-place packshot, collapsible side panels for
  * prices/position/promo, and inline asset upload. Light surface theme. */
 export function SlideEditor({
-  index, total, row, previewUrl, resolveImageUrl,
+  index, total, row, canal, previewUrl, resolveImageUrl,
   packshots, logos, allImages, onGoTo,
   onChange, onPlacePackshot, onResetPosition,
-  onUploadPackshot, onUploadBrandLogo, onPickPackshot, onPickBrandLogo,
+  onUploadPackshot, onUploadPackshot2, onUploadBrandLogo, onPickPackshot, onPickBrandLogo,
   accent = '#6366f1',
   packshotRect, onMoveOrResizePackshot,
   slideLabels,
 }: SlideEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  type PickerSlot = 'packshot' | 'logo' | 'promo_carton' | 'promo_ribbon'
-    | 'promo_remise_product' | 'promo_gratuite_product';
+
+  // ─── Promo container-word helpers ───────────────────────────────────
+  // Mirrors the backend's `_unit_word` / `_gratuite_word` in generator.py
+  // so the editor labels match what gets rendered onto the slide.
+  // Priority: per-row override (`row.promo_unit`) → channel default.
+  const isDetail = ((canal || '').toLowerCase()).includes('detail')
+    || ((canal || '').toLowerCase()).includes('détail');
+  const promoUnitOverride = (row.promo_unit || '').toLowerCase();
+  const promoUnitWord = (plural: boolean): string => {
+    if (promoUnitOverride === 'sac')    return plural ? 'sacs'    : 'sac';
+    if (promoUnitOverride === 'carton') return plural ? 'cartons' : 'carton';
+    if (promoUnitOverride === 'caisse') return plural ? 'caisses' : 'caisse';
+    if (promoUnitOverride === 'colis')  return 'colis';           // invariable
+    if (promoUnitOverride === 'palette') return plural ? 'palettes' : 'palette';
+    if (promoUnitOverride === 'unité' || promoUnitOverride === 'unite')
+      return plural ? 'unités' : 'unité';
+    return isDetail
+      ? (plural ? 'unités' : 'unité')
+      : (plural ? 'caisses' : 'caisse');
+  };
+  const promoGratuiteWord = (plural: boolean): string => {
+    const masculine = promoUnitOverride === 'sac' || promoUnitOverride === 'carton'
+      || promoUnitOverride === 'colis';
+    return (masculine ? 'gratuit' : 'gratuite') + (plural ? 's' : '');
+  };
+  type PickerSlot = 'packshot' | 'packshot2'
+    | 'packshot3' | 'packshot4' | 'packshot5' | 'packshot6'
+    | 'logo' | 'promo_carton' | 'promo_ribbon'
+    | 'promo_remise_product' | 'promo_gratuite_product'
+    | 'promo_gratuite_product_2' | 'promo_gratuite_product_3' | 'promo_gratuite_product_4';
   const [picker, setPicker] = useState<null | PickerSlot>(null);
 
   // ── Double-buffered preview ──
@@ -290,10 +355,31 @@ export function SlideEditor({
                 <option value="remise+gratuite">remise+gratuite</option>
               </select>
             </Field>
-            <NumField label="Acheter N caisses" value={row.promo_achat_qte}
+            {/* Container word for the "Pour N …" wording. Empty falls
+                back to the channel default (Gros → caisse, Détail →
+                unité). This is the per-row override; setting it here
+                changes the rendered text on this product's slide. */}
+            <Field label={`Unité promo (déf. ${isDetail ? 'unité' : 'caisse'})`}>
+              <select disabled={!row.is_promo} value={row.promo_unit || ''}
+                onChange={(e) => onChange({ promo_unit: e.target.value })}
+                style={inputStyle}>
+                <option value="">— (auto)</option>
+                <option value="sac">sac</option>
+                <option value="carton">carton</option>
+                <option value="caisse">caisse</option>
+                <option value="colis">colis</option>
+                <option value="palette">palette</option>
+                <option value="unité">unité</option>
+              </select>
+            </Field>
+            <NumField
+              label={`Acheter N ${promoUnitWord(true)}`}
+              value={row.promo_achat_qte}
               onChange={(v) => onChange({ promo_achat_qte: Math.round(v) })}
               step={1} min={0} disabled={!row.is_promo} />
-            <NumField label="X gratuites" value={row.promo_gratuit_qte}
+            <NumField
+              label={`X ${promoGratuiteWord(true)}`}
+              value={row.promo_gratuit_qte}
               onChange={(v) => onChange({ promo_gratuit_qte: Math.round(v) })}
               step={1} min={0} disabled={!row.is_promo || row.type_promo === 'remise'} />
             <NumField label="Remise (%)" value={row.promo_remise_pct}
@@ -370,7 +456,85 @@ export function SlideEditor({
               onPick={() => setPicker('promo_gratuite_product')}
               onClear={() => onChange({ promo_gratuite_image: '' })}
             />
+            {/* Multi-item gratuite — up to 3 additional free SKUs. Each
+                non-empty slot becomes its own cell on the right side of
+                the slide. Slots are disabled until type_promo includes
+                "gratuite" AND the primary gratuite image is set (so the
+                multi-item path is clearly an extension of the single-item
+                one rather than a competing config). */}
+            <PromoProductTile
+              label="Produit gratuit · 2"
+              hint="Optionnel · 2ᵉ SKU offert"
+              filename={row.promo_gratuite_image_2 || ''}
+              previewSrc={row.promo_gratuite_image_2 ? resolveImageUrl(row.promo_gratuite_image_2) : null}
+              accent={accent}
+              disabled={!row.is_promo || !(row.type_promo || '').toLowerCase().includes('gratuite') || !row.promo_gratuite_image}
+              onPick={() => setPicker('promo_gratuite_product_2')}
+              onClear={() => onChange({ promo_gratuite_image_2: '' })}
+            />
+            <PromoProductTile
+              label="Produit gratuit · 3"
+              hint="Optionnel · 3ᵉ SKU offert"
+              filename={row.promo_gratuite_image_3 || ''}
+              previewSrc={row.promo_gratuite_image_3 ? resolveImageUrl(row.promo_gratuite_image_3) : null}
+              accent={accent}
+              disabled={!row.is_promo || !(row.type_promo || '').toLowerCase().includes('gratuite') || !row.promo_gratuite_image_2}
+              onPick={() => setPicker('promo_gratuite_product_3')}
+              onClear={() => onChange({ promo_gratuite_image_3: '' })}
+            />
+            <PromoProductTile
+              label="Produit gratuit · 4"
+              hint="Optionnel · 4ᵉ SKU offert"
+              filename={row.promo_gratuite_image_4 || ''}
+              previewSrc={row.promo_gratuite_image_4 ? resolveImageUrl(row.promo_gratuite_image_4) : null}
+              accent={accent}
+              disabled={!row.is_promo || !(row.type_promo || '').toLowerCase().includes('gratuite') || !row.promo_gratuite_image_3}
+              onPick={() => setPicker('promo_gratuite_product_4')}
+              onClear={() => onChange({ promo_gratuite_image_4: '' })}
+            />
           </div>
+          {/* Which SKU is actually handed out. The photo alone didn't say,
+              so the slide caption now names it: "1 unité Gratuite : <nom>".
+              Options come from the deck itself, which keeps the wording
+              consistent with the real product names. */}
+          {row.is_promo && (row.type_promo || '').toLowerCase().includes('gratuite') && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: '#3f3f46', marginBottom: 6 }}>
+                Produit(s) offert(s) — nom affiché sur la diapo
+              </div>
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8,
+              }}>
+                {([
+                  ['promo_gratuite_nom',   'Offert · 1', row.promo_gratuite_image],
+                  ['promo_gratuite_nom_2', 'Offert · 2', row.promo_gratuite_image_2],
+                  ['promo_gratuite_nom_3', 'Offert · 3', row.promo_gratuite_image_3],
+                  ['promo_gratuite_nom_4', 'Offert · 4', row.promo_gratuite_image_4],
+                ] as const).map(([key, label, img], i) => (
+                  (i === 0 || img) && (
+                    <label key={key} style={{ fontSize: 11, color: '#52525b' }}>
+                      {label}
+                      <select
+                        value={(row[key] as string) || ''}
+                        onChange={(e) => onChange({ [key]: e.target.value })}
+                        style={{
+                          width: '100%', marginTop: 3, padding: '5px 7px',
+                          borderRadius: 7, border: '1px solid #e4e4e7',
+                          fontSize: 11.5, color: '#3f3f46', background: '#fff',
+                        }}
+                      >
+                        <option value="">— aucun nom —</option>
+                        {(slideLabels ?? []).map((nom) => (
+                          <option key={nom} value={nom}>{nom}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )
+                ))}
+              </div>
+            </div>
+          )}
           {row.is_promo && row.type_promo === 'remise+gratuite'
             && row.promo_remise_image && row.promo_gratuite_image
             && row.promo_remise_image !== row.promo_gratuite_image && (
@@ -396,7 +560,37 @@ export function SlideEditor({
           accent={accent}
           onUpload={onUploadPackshot}
           onPickFromLibrary={() => setPicker('packshot')}
+          onClear={() => onChange({ packshot: '' })}
         />
+        <AssetCard
+          title="2ème parfum (optionnel)"
+          subtitle={row.packshot2 || 'Deux senteurs sur une seule diapo — les 2 flacons se chevauchent'}
+          previewSrc={row.packshot2 ? resolveImageUrl(row.packshot2) : null}
+          accent={accent}
+          onUpload={onUploadPackshot2 ?? onUploadPackshot}
+          onPickFromLibrary={() => setPicker('packshot2')}
+          onClear={() => onChange({ packshot2: '' })}
+        />
+        {/* Scents 3-6. Each unlocks once the previous slot is filled, so
+            the list can't end up with holes — the renderer lays out the
+            non-empty scents in order beside the hero bottle. */}
+        {([3, 4, 5, 6] as const).map((n) => {
+          const key = `packshot${n}` as 'packshot3' | 'packshot4' | 'packshot5' | 'packshot6';
+          const prev = (n === 3 ? row.packshot2 : row[`packshot${n - 1}` as typeof key]) || '';
+          return (
+            <AssetCard
+              key={key}
+              title={`${n}ᵉ parfum (optionnel)`}
+              subtitle={row[key] || `Ajoute une ${n}ᵉ senteur — affichée plus petite à côté du flacon principal`}
+              previewSrc={row[key] ? resolveImageUrl(row[key] as string) : null}
+              accent={accent}
+              disabled={!prev}
+              onUpload={onUploadPackshot2 ?? onUploadPackshot}
+              onPickFromLibrary={() => setPicker(key)}
+              onClear={() => onChange({ [key]: '' })}
+            />
+          );
+        })}
         <AssetCard
           title={`Logo de marque — ${brand || '(aucune)'}`}
           subtitle={row.logo_groupe || '(aucun)'}
@@ -404,6 +598,7 @@ export function SlideEditor({
           accent={accent}
           onUpload={onUploadBrandLogo}
           onPickFromLibrary={() => setPicker('logo')}
+          onClear={() => onChange({ logo_groupe: '' })}
         />
       </div>
 
@@ -411,6 +606,11 @@ export function SlideEditor({
         open={picker !== null}
         title={
           picker === 'packshot'              ? `Packshots ${brand}` :
+          picker === 'packshot2'             ? `2ème parfum — packshots ${brand}` :
+          picker === 'packshot3'             ? `3ème parfum — packshots ${brand}` :
+          picker === 'packshot4'             ? `4ème parfum — packshots ${brand}` :
+          picker === 'packshot5'             ? `5ème parfum — packshots ${brand}` :
+          picker === 'packshot6'             ? `6ème parfum — packshots ${brand}` :
           picker === 'logo'                  ? `Logos ${brand}` :
           picker === 'promo_carton'          ? 'Choisir un carton' :
           picker === 'promo_ribbon'          ? 'Choisir un ruban' :
@@ -424,7 +624,9 @@ export function SlideEditor({
           'Aucune image dans la bibliothèque'
         }
         assets={
-          picker === 'packshot' ? packshots :
+          picker === 'packshot' || picker === 'packshot2' || picker === 'packshot3'
+            || picker === 'packshot4' || picker === 'packshot5' || picker === 'packshot6'
+            ? packshots :
           picker === 'logo'     ? logos :
           (allImages ?? [])
         }
@@ -432,11 +634,19 @@ export function SlideEditor({
         onPick={(name) => {
           switch (picker) {
             case 'packshot':              onPickPackshot(name); break;
+            case 'packshot2':             onChange({ packshot2: name }); break;
+            case 'packshot3':             onChange({ packshot3: name }); break;
+            case 'packshot4':             onChange({ packshot4: name }); break;
+            case 'packshot5':             onChange({ packshot5: name }); break;
+            case 'packshot6':             onChange({ packshot6: name }); break;
             case 'logo':                  onPickBrandLogo(name); break;
             case 'promo_carton':          onChange({ promo_carton_image: name }); break;
             case 'promo_ribbon':          onChange({ promo_ribbon_image: name }); break;
             case 'promo_remise_product':  onChange({ promo_remise_image: name }); break;
             case 'promo_gratuite_product':onChange({ promo_gratuite_image: name }); break;
+            case 'promo_gratuite_product_2': onChange({ promo_gratuite_image_2: name }); break;
+            case 'promo_gratuite_product_3': onChange({ promo_gratuite_image_3: name }); break;
+            case 'promo_gratuite_product_4': onChange({ promo_gratuite_image_4: name }); break;
           }
         }}
         onClose={() => setPicker(null)}
@@ -665,10 +875,13 @@ function Section({ title, defaultOpen, children }: { title: string; defaultOpen?
 }
 
 function AssetCard({
-  title, subtitle, previewSrc, onUpload, onPickFromLibrary, accent,
+  title, subtitle, previewSrc, onUpload, onPickFromLibrary, onClear, accent,
 }: {
   title: string; subtitle: string; previewSrc: string | null;
   onUpload: (file: File) => void; onPickFromLibrary: () => void;
+  /** Optional — when set, a small "×" button appears that clears the image
+   *  from the slide (writes an empty string back to the field). */
+  onClear?: () => void;
   accent: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -708,6 +921,19 @@ function AssetCard({
         <button onClick={onPickFromLibrary} style={{ ...secondaryBtn, flex: 1 }}>
           <Library size={12} /> Bibliothèque
         </button>
+        {onClear && previewSrc && (
+          <button
+            onClick={onClear}
+            title="Retirer l'image de cette slide"
+            style={{
+              ...secondaryBtn,
+              padding: '7px 9px',
+              borderColor: '#fecaca',
+              color: '#b91c1c',
+            }}>
+            <X size={14} />
+          </button>
+        )}
       </div>
       <input
         ref={inputRef} type="file" accept="image/*"

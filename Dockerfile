@@ -57,13 +57,22 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # System deps:
-#  - unixodbc + g++ + msodbcsql18  → pyodbc + SAP SQL Server import
-#  - curl + gnupg                  → fetch Microsoft repo key
-#  - tini                          → proper PID 1 signal handling for uvicorn
+#  - unixodbc + g++ + msodbcsql18    → pyodbc + SAP SQL Server import
+#  - curl + gnupg                    → fetch Microsoft repo key
+#  - tini                            → proper PID 1 signal handling
+#  - fonts-crosextra-carlito         → Calibri metric-compatible font. Calibri
+#                                      itself is Microsoft-proprietary so we
+#                                      can't ship it; Carlito has the same
+#                                      character widths and similar look, so
+#                                      the PIL preview renders text at the
+#                                      same proportions as PowerPoint does.
+#  - fonts-liberation                → Arial / Times New Roman metric-compat
+#                                      fallbacks (kept for legacy slides).
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         curl gnupg ca-certificates tini \
         unixodbc unixodbc-dev g++ \
+        fonts-crosextra-carlito fonts-liberation fonts-dejavu \
  && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
  && echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" \
@@ -72,6 +81,46 @@ RUN apt-get update \
  && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 \
  && apt-get purge -y --auto-remove curl gnupg \
  && rm -rf /var/lib/apt/lists/*
+
+# OpenSSL 3 banned SHA-1 signatures + TLS 1.0/1.1 by default, which makes
+# pyodbc's connection to a legacy SQL Server (≤ 2014) fail with:
+#   "SSL Provider: [error:0A00014D:SSL routines::legacy sigalg disallowed]"
+# We write a permissive openssl.cnf that:
+#   - enables the legacy provider (re-allows SHA-1 signatures)
+#   - lowers SECLEVEL to 0 (re-allows weaker cipher suites)
+#   - lowers MinProtocol to TLSv1
+#   - enables UnsafeLegacyServerConnect (re-allows legacy renegotiation)
+# It's scoped to our Python process via the OPENSSL_CONF env var below, so
+# apt/curl/etc. on the system continue to use Debian's strict defaults.
+RUN printf '%s\n' \
+        'openssl_conf = openssl_init' \
+        '' \
+        '[openssl_init]' \
+        'providers = provider_sect' \
+        'ssl_conf = ssl_sect' \
+        '' \
+        '[provider_sect]' \
+        'default = default_sect' \
+        'legacy = legacy_sect' \
+        '' \
+        '[default_sect]' \
+        'activate = 1' \
+        '' \
+        '[legacy_sect]' \
+        'activate = 1' \
+        '' \
+        '[ssl_sect]' \
+        'system_default = system_default_sect' \
+        '' \
+        '[system_default_sect]' \
+        'MinProtocol = TLSv1' \
+        'CipherString = DEFAULT:@SECLEVEL=0' \
+        'Options = UnsafeLegacyServerConnect,UnsafeLegacyRenegotiation' \
+        > /etc/ssl/openssl-legacy.cnf
+
+# Tell every process in this image to use the permissive OpenSSL config.
+# Affects pyodbc's TLS handshake; apt/curl no longer needed at runtime.
+ENV OPENSSL_CONF=/etc/ssl/openssl-legacy.cnf
 
 # Python deps (+ pyodbc which isn't pinned in requirements.txt)
 COPY requirements.txt .

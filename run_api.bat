@@ -7,6 +7,11 @@ REM We try Python 3.12 via the `py` launcher first (most reliable on Windows
 REM since 3.13/3.14 still lack prebuilt wheels for numpy/pandas/etc.). Falls
 REM back to whatever `python` resolves to on PATH.
 
+REM `setlocal` scopes PC_DATA_DIR so it doesn't leak into the parent cmd
+REM and clobber Docker Compose if you later run `docker compose up` from
+REM the same window. uvicorn inherits the var fine during its lifetime.
+setlocal
+
 cd /d "%~dp0"
 
 REM Where user-mutable data lives (state.db + images/ + archive/). Kept
@@ -20,3 +25,5 @@ where /q py && (
 ) || (
   python -m uvicorn api.server:app --host 0.0.0.0 --port 8000 --reload
 )
+
+endlocal

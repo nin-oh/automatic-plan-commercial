@@ -17,9 +17,13 @@ class StateOut(BaseModel):
     titre: str
     canal: str
     mois: str
+    # Détail catalogue brand ("MIO" | "ZEN") — drives the default family
+    # ordering. Ignored when canal is Gros.
+    marque: str
     banner: Optional[str]
     background: Optional[str]
     cover_photo: Optional[str]
+    nouveau_lancement: bool
     n_products: int
 
 
@@ -27,12 +31,15 @@ class MetaIn(BaseModel):
     titre: Optional[str] = None
     canal: Optional[str] = None
     mois: Optional[str] = None
+    marque: Optional[str] = None
+    nouveau_lancement: Optional[bool] = None
 
 
 def _state_out(s: Session) -> StateOut:
     return StateOut(
-        titre=s.titre, canal=s.canal, mois=s.mois,
+        titre=s.titre, canal=s.canal, mois=s.mois, marque=s.marque or "MIO",
         banner=s.banner, background=s.background, cover_photo=s.cover_photo,
+        nouveau_lancement=bool(getattr(s, "nouveau_lancement", False)),
         n_products=len(s.products),
     )
 
@@ -50,6 +57,10 @@ def update_meta(payload: MetaIn, s: Session = Depends(with_session)):
         s.canal = payload.canal
     if payload.mois is not None:
         s.mois = payload.mois
+    if payload.marque is not None:
+        s.marque = payload.marque
+    if payload.nouveau_lancement is not None:
+        s.nouveau_lancement = payload.nouveau_lancement
     return _state_out(s)
 
 

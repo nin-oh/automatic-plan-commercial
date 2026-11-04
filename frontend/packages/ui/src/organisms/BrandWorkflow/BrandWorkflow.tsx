@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Upload } from 'lucide-react';
+import { ImagePicker, type ImageAsset } from '../../molecules/ImagePicker/ImagePicker';
 
 export interface BrandRow {
   index: number;
@@ -11,7 +12,22 @@ export interface BrandRow {
   is_promo: boolean;
   prix_gros: number;
   prix_gros_net: number;
+  /** Free-text status used by the "SKUs sans packshot" workflow. Empty when
+   *  uncategorised. Other places that build BrandRow can leave this
+   *  undefined — the dropdown in MissingPackshotsModal treats it as ''. */
+  packshot_status?: string;
 }
+
+/** Categorisation options for the "no packshot" workflow. Machine values
+ *  match those expected by the backend Excel export (api/routes/products.py
+ *  `export_missing_packshots`). Adding a new option here + there is all
+ *  that's needed — the field is a free-text column so no migration. */
+export const PACKSHOT_STATUS_OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: '',             label: 'À catégoriser'      },
+  { value: 'discontinued', label: "Produit n'existe plus" },
+  { value: 'in_progress',  label: 'Packshot en cours'  },
+  { value: 'other',        label: 'Autre'              },
+];
 
 export type BulkMode = 'match' | 'create';
 
@@ -25,14 +41,34 @@ export interface BrandWorkflowProps {
     files: File[],
     mode: BulkMode,
   ) => void;
+  /** Per-SKU packshot upload — fires when the user uploads a NEW file via
+   *  the picker's "Téléverser" button or drops a file directly onto a card.
+   *  The file is persisted under the brand and assigned as the SKU's
+   *  packshot. Optional — when omitted, the upload affordances disappear. */
+  onUploadSkuPackshot?: (skuIndex: number, brand: string, file: File) => void;
+  /** Per-SKU pick-from-library — fires when the user picks an existing
+   *  image from the brand's library inside the picker modal. The handler
+   *  just needs to PATCH the SKU's `packshot` field to `filename`. Optional
+   *  — when omitted (and `onUploadSkuPackshot` is also omitted), cards are
+   *  read-only. When only `onUploadSkuPackshot` is set, clicking a card
+   *  opens the file picker directly (old behaviour). */
+  onPickSkuPackshot?: (skuIndex: number, filename: string) => void;
+  /** Image library used when the picker opens. Filtered to the active
+   *  brand inside the component. Pass [] to disable library picking. */
+  images?: ImageAsset[];
   /** Brand accent color */
   accent?: string;
 }
 
 export function BrandWorkflow({
   rows, resolveImageUrl, onUploadBrandLogo, onBulkPackshots,
+  onUploadSkuPackshot, onPickSkuPackshot, images = [],
   accent = '#6366f1',
 }: BrandWorkflowProps) {
+  // Which SKU's picker is open. `null` = closed. The picker decides whether
+  // it can pick from library (onPickSkuPackshot set) and/or upload
+  // (onUploadSkuPackshot set) from the bound callbacks below.
+  const [pickerSkuIdx, setPickerSkuIdx] = useState<number | null>(null);
   const brandField: 'groupe' | 'sous_groupe' =
     rows.some((r) => (r.sous_groupe || '').trim()) ? 'sous_groupe' : 'groupe';
 
@@ -115,16 +151,15 @@ export function BrandWorkflow({
               padding: 8, display: 'flex', flexDirection: 'column', gap: 6,
               boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
             }}>
-              <div style={{
-                height: 110, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: '#fafafa', borderRadius: 6, overflow: 'hidden',
-                border: '1px solid #f4f4f5',
-              }}>
-                {r.packshot
-                  ? <img src={resolveImageUrl(r.packshot)} alt={r.nom}
-                      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-                  : <span style={{ color: '#a1a1aa', fontSize: 11 }}>pas de packshot</span>}
-              </div>
+              <SkuThumb
+                row={r} accent={accent}
+                resolveImageUrl={resolveImageUrl}
+                editable={!!onPickSkuPackshot || !!onUploadSkuPackshot}
+                onOpenPicker={() => setPickerSkuIdx(r.index)}
+                onDropFile={onUploadSkuPackshot
+                  ? (file) => onUploadSkuPackshot(r.index, brand, file)
+                  : undefined}
+              />
               <div style={{
                 color: '#18181b', fontSize: 12, fontWeight: 600,
                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
@@ -138,7 +173,88 @@ export function BrandWorkflow({
           ))}
         </div>
       </Section>
+
+      <ImagePicker
+        open={pickerSkuIdx !== null}
+        title={`Choisir une image — ${brand}`}
+        emptyHint={`Aucune image enregistrée pour ${brand}. Téléversez-en une ci-dessus.`}
+        // Show images tagged with this brand FIRST (case-insensitive match),
+        // then everything else — lets the user fall back to a different brand
+        // if they've stored an image under the wrong brand. The picker also
+        // has a search box for further filtering.
+        assets={[
+          ...images.filter((a) => (a.brand || '').toUpperCase() === brand.toUpperCase()),
+          ...images.filter((a) => (a.brand || '').toUpperCase() !== brand.toUpperCase()),
+        ]}
+        resolveUrl={resolveImageUrl}
+        initialSearch={brand}
+        onPick={(filename) => {
+          if (pickerSkuIdx !== null && onPickSkuPackshot) {
+            onPickSkuPackshot(pickerSkuIdx, filename);
+          }
+        }}
+        onUpload={onUploadSkuPackshot ? (file) => {
+          if (pickerSkuIdx !== null) onUploadSkuPackshot(pickerSkuIdx, brand, file);
+        } : undefined}
+        uploadAccent={accent}
+        onClose={() => setPickerSkuIdx(null)}
+      />
     </div>
+  );
+}
+
+function SkuThumb({
+  row, resolveImageUrl, editable, onOpenPicker, onDropFile, accent,
+}: {
+  row: BrandRow;
+  resolveImageUrl: (n: string) => string;
+  editable: boolean;
+  /** Open the library/upload picker modal for this SKU. */
+  onOpenPicker: () => void;
+  /** When set, dropping a file directly onto the card bypasses the picker
+   *  and uploads immediately. Hidden when null (drag-drop disabled). */
+  onDropFile?: (file: File) => void;
+  accent: string;
+}) {
+  const [hover, setHover] = useState(false);
+  const thumb = row.packshot
+    ? <img src={resolveImageUrl(row.packshot)} alt={row.nom}
+        style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+    : <span style={{ color: '#a1a1aa', fontSize: 11 }}>
+        {editable ? 'Cliquez pour choisir une image' : 'pas de packshot'}
+      </span>;
+
+  const box: React.CSSProperties = {
+    height: 110, width: '100%', display: 'flex',
+    alignItems: 'center', justifyContent: 'center',
+    background: hover && editable ? `${accent}0a` : '#fafafa',
+    borderRadius: 6, overflow: 'hidden',
+    border: `1px ${hover && editable ? 'dashed' : 'solid'} ${hover && editable ? accent : '#f4f4f5'}`,
+    transition: 'all 140ms',
+    cursor: editable ? 'pointer' : 'default',
+    padding: 0,
+  };
+
+  if (!editable) {
+    return <div style={box}>{thumb}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={onOpenPicker}
+      title={`Choisir l'image de ${row.nom}`}
+      style={box}
+      onDragOver={onDropFile ? (e) => { e.preventDefault(); setHover(true); } : undefined}
+      onDragLeave={onDropFile ? () => setHover(false) : undefined}
+      onDrop={onDropFile ? (e) => {
+        e.preventDefault(); setHover(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onDropFile(f);
+      } : undefined}
+    >
+      {thumb}
+    </button>
   );
 }
 

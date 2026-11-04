@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from ..deps import resolve_image
 from ..session import (
-    ARCHIVE_DIR, Session, normalize_product, with_session,
+    ARCHIVE_DIR, Session, apply_stored_priority, apply_product_memory,
+    create_snapshot, normalize_product, with_session,
 )
 from plan_commercial import export_pdf, read_excel, render_cover, render_product
 
@@ -105,18 +106,37 @@ def download_pptx(month: str, pptx_name: str):
     )
 
 
+# A valid multi-page PDF is always at least a few KB; anything smaller is a
+# truncated write (e.g. from a full disk) that must not be served or kept.
+_MIN_VALID_PDF = 1024
+
+
 @router.get("/{month}/{name}/download.pdf")
 def download_pdf(month: str, name: str):
     """Lazy PDF: rendered on first request, cached on disk, served instantly
     on subsequent ones. We never block /api/generate on PDF rendering — the
     first download takes the hit instead, and only if the user actually
-    asks for the PDF."""
+    asks for the PDF.
+
+    A cached PDF is only trusted when it's non-trivially sized — a 0-byte or
+    truncated file (which a full disk can leave behind) is discarded and
+    re-rendered, so the user never gets served a broken/empty PDF."""
     folder = ARCHIVE_DIR / month
     pdf_path = _find_in_folder(folder, name, ".pdf")
     if pdf_path is not None:
-        return FileResponse(
-            str(pdf_path), media_type="application/pdf", filename=pdf_path.name,
-        )
+        try:
+            good = pdf_path.stat().st_size >= _MIN_VALID_PDF
+        except OSError:
+            good = False
+        if good:
+            return FileResponse(
+                str(pdf_path), media_type="application/pdf", filename=pdf_path.name,
+            )
+        # Broken cache — drop it and fall through to a fresh render.
+        try:
+            pdf_path.unlink()
+        except OSError:
+            pass
 
     xlsx = _find_in_folder(folder, name, ".xlsx")
     if xlsx is None:
@@ -132,7 +152,12 @@ def download_pdf(month: str, name: str):
     try:
         out_path.write_bytes(pdf_bytes)         # cache for next time
     except OSError:
-        pass
+        # Partial write (disk full) — remove the stub so it isn't served as a
+        # "cached" broken PDF on the next request.
+        try:
+            out_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     return Response(
         content=pdf_bytes,
@@ -178,6 +203,7 @@ def load_archive(month: str, name: str, s: Session = Depends(with_session)):
     xlsx = _find_in_folder(ARCHIVE_DIR / month, name, ".xlsx")
     if xlsx is None:
         raise HTTPException(404, "no sidecar xlsx")
+    create_snapshot(f"Avant chargement archive ({name})")
     deck = read_excel(xlsx.read_bytes(), image_resolver=lambda n: n)
     rows: List[Dict[str, Any]] = []
     for g in deck.groupes:
@@ -185,9 +211,11 @@ def load_archive(month: str, name: str, s: Session = Depends(with_session)):
             for p in sg.produits:
                 rows.append(normalize_product({
                     "groupe": g.nom, "sous_groupe": sg.nom, "nom": p.nom,
+                    "item_code": p.item_code,
                     "packshot": p.packshot_path or "",
                     "nom_image": p.nom_image_path or "",
                     "prix_gros": p.prix_gros, "prix_gros_net": p.prix_gros_net,
+                    "prix_detail": p.prix_detail, "prix_detail_net": p.prix_detail_net,
                     "colisage": p.colisage,
                     "colisage_prix_gros": p.colisage_prix_gros,
                     "colisage_prix_gros_net": p.colisage_prix_gros_net,
@@ -202,7 +230,8 @@ def load_archive(month: str, name: str, s: Session = Depends(with_session)):
                     "packshot_width": p.packshot_width,
                     "packshot_height": p.packshot_height,
                 }))
-    s.products = rows
+    apply_product_memory(rows)
+    s.products = apply_stored_priority(rows)
     s.titre, s.canal, s.mois = deck.titre, deck.canal, deck.mois
     return LoadOut(loaded=len(rows))
 

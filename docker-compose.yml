@@ -21,25 +21,47 @@ services:
       - "8000:8000"
     environment:
       # The container's session.py reads this and uses it as the root for
-      # state.db + images/ + archive/ — one mount point covers everything.
-      # Almost never needs changing; override via .env if you do.
-      PC_DATA_DIR: ${PC_DATA_DIR:-/app/data}
+      # state.db + images/ + archive/. HARDCODED on purpose — if you leave
+      # this overridable, a stray PC_DATA_DIR in the shell (e.g. from
+      # run_dev.bat) leaks into the volume target below and breaks the
+      # mount with "too many colons".
+      PC_DATA_DIR: /app/data
+      # SAP credentials — read once at app startup to populate the
+      # in-process cache (and on every /api/sap/sync call). Override
+      # SAP_USERNAME / SAP_PASSWORD in a local .env file alongside this
+      # compose file — never commit them. Server/database default to
+      # the values in api/routes/sap.py.
+      SAP_SERVER:   ${SAP_SERVER:-192.168.1.240}
+      SAP_DATABASE: ${SAP_DATABASE:-DATAWAREHOUSE}
+      SAP_USERNAME: ${SAP_USERNAME:-}
+      SAP_PASSWORD: ${SAP_PASSWORD:-}
     volumes:
-      # Single persistent volume: state.db (current deck), images/ (user-
-      # uploaded packshots & logos), archive/ (generated decks).
+      # Single persistent mount. Only the HOST side is configurable — the
+      # container side is always /app/data so a stray PC_DATA_DIR can't
+      # poison the mount spec.
       #
-      # PC_DATA_HOST controls the *host* side of this mount. Defaults to the
-      # named Docker volume `pc_data`; override in .env to a real path
-      # (e.g. PC_DATA_HOST=D:/plan_commercial_data) to keep your data in a
-      # browsable host folder instead of inside Docker's storage.
+      # PC_DATA_HOST defaults to `./data` (auto-created next to docker-
+      # compose.yml). Override in .env to:
+      #   - an absolute path: PC_DATA_HOST=C:/plan_commercial   (Windows)
+      #                       PC_DATA_HOST=/var/lib/pc          (Linux)
+      #   - a Docker-managed named volume: PC_DATA_HOST=pc_data (opaque)
       #
       # Built-in graphics live under /app/assets/builtin in the image and
       # are NOT a volume — they ship with the image and update with releases.
-      - ${PC_DATA_HOST:-pc_data}:${PC_DATA_DIR:-/app/data}
-    # Useful for SAP — if the warehouse only accepts the docker host's IP,
-    # uncomment one of these. `host` lets the container reach 192.168.x
-    # addresses directly via the host's network stack.
-    # network_mode: host
+      - ${PC_DATA_HOST:-./data}:/app/data
+    # SAP import on a LAN address (e.g. 192.168.1.240) needs the container
+    # to see the host's network. Three options:
+    #   1. Keep bridge networking (default below) — works when Docker
+    #      Desktop's bridge can route to your LAN. Try this first.
+    #   2. Switch to host networking (uncomment `network_mode: host` below).
+    #      On Windows requires Docker Desktop 4.34+ with "Enable host
+    #      networking" turned on in Settings → Features in development.
+    #      When this is on, the `ports:` block above is ignored — the
+    #      container binds to port 8000 on the host directly.
+    #   3. Add a route for the SAP host explicitly via `extra_hosts`.
+    extra_hosts:
+      - "sap.local:192.168.1.240"     # gives the container a DNS shortcut
+    # network_mode: host              # uncomment if (1) doesn't reach SAP
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=2)"]
       interval: 30s

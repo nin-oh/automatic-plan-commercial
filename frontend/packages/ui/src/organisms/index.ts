@@ -25,15 +25,19 @@ export type { MatrixGridProps, MatrixGridRow, MatrixGridColumn } from './MatrixG
 export { DeckMetaForm } from './DeckMetaForm';
 export type { DeckMetaFormProps, DeckMeta } from './DeckMetaForm';
 export { SlideEditor } from './SlideEditor';
-export type { SlideEditorProps, SlideProductRow } from './SlideEditor';
+export type { SlideEditorProps, SlideProductRow, PackshotRect } from './SlideEditor';
 export { ImageLibrary } from './ImageLibrary';
 export type { ImageLibraryProps } from './ImageLibrary';
-export { BrandWorkflow } from './BrandWorkflow';
+export { BrandWorkflow, PACKSHOT_STATUS_OPTIONS } from './BrandWorkflow';
 export type { BrandWorkflowProps, BrandRow, BulkMode } from './BrandWorkflow';
 export { ArchiveBrowser } from './ArchiveBrowser';
 export type { ArchiveBrowserProps, ArchiveDeck, ArchiveMonth } from './ArchiveBrowser';
 export { GeneratePanel } from './GeneratePanel';
-export type { GeneratePanelProps, GenerateSummary, GenerateResult } from './GeneratePanel';
+export type {
+  GeneratePanelProps, GenerateSummary, GenerateResult, GenerateProgressSnapshot,
+} from './GeneratePanel';
+export { MissingPackshotsModal } from './MissingPackshotsModal';
+export type { MissingPackshotsModalProps } from './MissingPackshotsModal';
 
 // ── PromoCanvasEditor (Konva-based) — PARKED ─────────────────────────────
 // Source files in `./PromoCanvasEditor/` are kept for later re-enabling.

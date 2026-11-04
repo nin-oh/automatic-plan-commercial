@@ -1,83 +1,244 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SectionCard, Toast } from '@amafin/ui';
-import { ListOrdered, GripVertical, Search } from 'lucide-react';
-import { PageShell, PC_ACCENT } from './PageShell';
+import {
+  DndContext, PointerSensor, useSensor, useSensors, closestCenter,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext, verticalListSortingStrategy, useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { ListOrdered, GripVertical, Search, ChevronDown, ChevronRight, Tag, Wand2 } from 'lucide-react';
+import { PageShell, PC_ACCENT, pcButton } from './PageShell';
 import * as api from '../api';
 import { usePlanCommercial } from '../store/usePlanCommercial';
 
 /**
- * Reorder SKUs by typing a target priority. The semantics match the user's
- * mental model: setting a row's priority to N moves it to the Nth position
- * and everyone else shifts to make room — whoever was at N drops to N+1, etc.
+ * Two-level reordering, now drag-first:
+ *   • OUTER — drag a whole brand block by its header grip. `moveBrand(brand, N)`.
+ *   • INNER — drag a SKU row by its grip inside its own brand block.
+ *     `moveProductInBrand(idx, N)`. Number inputs are kept as a precise
+ *     fallback (jump 40 positions without 40 drags).
  *
- * The whole reshuffle happens server-side via a single `pop + insert` call
- * (`POST /api/products/{idx}/move`) so we never invent positions that diverge
- * from the deck's actual storage order — the rendered slide order IS this list.
+ * Both layers are remembered in SQLite (sku_priority + brand_priority) and
+ * survive Excel/SAP re-imports — see `apply_stored_priority` on the backend.
+ *
+ * Dragging is disabled while the search filter is active: positions in a
+ * filtered list don't map 1:1 to real positions, so a drop there would move
+ * rows somewhere the user doesn't expect.
  */
+
+// ── Sortable brand block ────────────────────────────────────────────────
+function SortableBrand({
+  brand, children, dragDisabled,
+}: {
+  brand: string;
+  children: (handleProps: Record<string, any>) => React.ReactNode;
+  dragDisabled: boolean;
+}) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id: `brand:${brand}`, disabled: dragDisabled });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.65 : 1,
+        zIndex: isDragging ? 10 : undefined,
+        position: 'relative',
+      }}
+    >
+      {children({ ...attributes, ...listeners })}
+    </div>
+  );
+}
+
+// ── Sortable SKU row ────────────────────────────────────────────────────
+function SortableSku({
+  id, children, dragDisabled,
+}: {
+  id: string;
+  children: (handleProps: Record<string, any>) => React.ReactNode;
+  dragDisabled: boolean;
+}) {
+  const {
+    attributes, listeners, setNodeRef, transform, transition, isDragging,
+  } = useSortable({ id, disabled: dragDisabled });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.65 : 1,
+        background: isDragging ? '#FFF7ED' : undefined,
+        position: 'relative',
+        zIndex: isDragging ? 10 : undefined,
+      }}
+    >
+      {children({ ...attributes, ...listeners })}
+    </div>
+  );
+}
+
+const gripStyle: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+  width: 22, height: 22, borderRadius: 5, border: 'none',
+  background: 'transparent', color: '#c4c4c8', cursor: 'grab',
+  touchAction: 'none',
+};
+
 export function PlanCommercialOrderPage() {
-  const { products, refreshProducts, bumpPreview } = usePlanCommercial();
+  const { state, products, refreshState, refreshProducts, bumpPreview, previewBust } = usePlanCommercial();
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [search, setSearch] = useState('');
-  // Per-row editable buffer keyed by SKU position-snapshot id. We use the
-  // current array index because rows have no stable id field — refreshing
-  // after a move re-keys everything correctly.
-  const [drafts, setDrafts] = useState<Record<number, string>>({});
+  // Per-row buffers. SKU drafts keyed by global index; brand drafts by name.
+  const [skuDrafts, setSkuDrafts] = useState<Record<number, string>>({});
+  const [brandDrafts, setBrandDrafts] = useState<Record<string, string>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
 
-  useEffect(() => { refreshProducts(); }, [refreshProducts]);
-  // Reset the per-row drafts whenever the list changes — otherwise drafts
-  // would point at stale indices after a successful move.
-  useEffect(() => { setDrafts({}); }, [products.length, products]);
+  const sensors = useSensors(
+    // 6px activation distance so plain clicks (collapse, inputs) never
+    // start a drag by accident.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return products.map((p, i) => ({ row: p, idx: i }));
-    return products
-      .map((p, i) => ({ row: p, idx: i }))
-      .filter(({ row }) =>
-        (row.nom || '').toLowerCase().includes(q) ||
-        (row.groupe || '').toLowerCase().includes(q) ||
-        (row.sous_groupe || '').toLowerCase().includes(q),
-      );
-  }, [products, search]);
+  useEffect(() => { refreshProducts(); refreshState(); }, [refreshProducts, refreshState]);
+  useEffect(() => { setSkuDrafts({}); setBrandDrafts({}); }, [products.length, products]);
 
-  async function commitMove(idx: number, raw: string) {
-    const parsed = parseInt(raw, 10);
-    if (!Number.isFinite(parsed) || parsed < 1) {
-      // Invalid input — just clear the draft so the cell reverts.
-      setDrafts((d) => { const { [idx]: _, ...rest } = d; return rest; });
-      return;
-    }
-    // No-op if user typed the row's current position.
-    if (parsed === idx + 1) {
-      setDrafts((d) => { const { [idx]: _, ...rest } = d; return rest; });
-      return;
-    }
+  const isDetail = ((state?.canal || '').toLowerCase()).includes('detail')
+    || ((state?.canal || '').toLowerCase()).includes('détail');
+  // Gros uses one catalogue-wide family list; Détail has one per marque.
+  const presetLabel = isDetail ? (state?.marque || 'MIO') : 'Gros';
+
+  async function applyDefaultOrder() {
+    if (!confirm(
+      `Réordonner les ${products.length} produits selon l'ordre par défaut ` +
+      `${presetLabel} (familles : poudre main, IRIS, Matic, A+, Javel…) ? ` +
+      "L'ordre actuel sera remplacé.",
+    )) return;
     try {
-      const r = await api.moveProduct(idx, parsed);
+      const r = await api.applyDefaultOrder();
       await refreshProducts();
       bumpPreview();
       setToast({
-        message: `Déplacé : position ${r.from + 1} → ${r.to + 1}`,
+        message: `Ordre ${r.marque} appliqué — ${r.matched}/${r.total} produits reconnus par famille.`,
         type: 'success',
       });
     } catch (e: any) {
-      setToast({
-        message: e?.response?.data?.detail ?? "Échec du déplacement",
-        type: 'error',
-      });
+      setToast({ message: e?.response?.data?.detail ?? 'Échec', type: 'error' });
     }
   }
+
+  const dragDisabled = search.trim().length > 0;
+
+  // Group products by sous_groupe (= brand). Preserve current order — the
+  // brand_priority is mirrored from this every save, so the iteration order
+  // IS the brand order.
+  const groups = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const seen: string[] = [];
+    const byBrand: Record<string, Array<{ row: any; idx: number }>> = {};
+    products.forEach((p: any, idx: number) => {
+      const brand = (p.sous_groupe || '').trim() || '(sans marque)';
+      if (!byBrand[brand]) { byBrand[brand] = []; seen.push(brand); }
+      // Filter by search at SKU level — empty groups are auto-hidden.
+      if (!q
+        || (p.nom || '').toLowerCase().includes(q)
+        || (p.groupe || '').toLowerCase().includes(q)
+        || brand.toLowerCase().includes(q)
+      ) {
+        byBrand[brand].push({ row: p, idx });
+      }
+    });
+    return seen
+      .map((brand, brandPos) => ({
+        brand,
+        brandPos,
+        items: byBrand[brand],
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [products, search]);
+
+  async function commitSkuMove(idx: number, raw: string) {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setSkuDrafts((d) => { const { [idx]: _, ...rest } = d; return rest; });
+      return;
+    }
+    try {
+      const r = await api.moveProductInBrand(idx, parsed);
+      await refreshProducts();
+      bumpPreview();
+      setToast({
+        message: `${r.brand} · position ${r.from + 1} → ${r.to + 1}`,
+        type: 'success',
+      });
+    } catch (e: any) {
+      setToast({ message: e?.response?.data?.detail ?? 'Échec du déplacement', type: 'error' });
+    }
+  }
+
+  async function commitBrandMove(brand: string, raw: string) {
+    const parsed = parseInt(raw, 10);
+    if (!Number.isFinite(parsed) || parsed < 1) {
+      setBrandDrafts((d) => { const { [brand]: _, ...rest } = d; return rest; });
+      return;
+    }
+    try {
+      const r = await api.moveBrand(brand, parsed);
+      await refreshProducts();
+      bumpPreview();
+      setToast({
+        message: `Marque «${brand}» : position ${r.from + 1} → ${r.to + 1}`,
+        type: 'success',
+      });
+    } catch (e: any) {
+      setToast({ message: e?.response?.data?.detail ?? 'Échec du déplacement de marque', type: 'error' });
+    }
+  }
+
+  // ── Drag handlers ──
+  async function onBrandDragEnd(e: DragEndEvent) {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const from = String(active.id).replace('brand:', '');
+    const toBrand = String(over.id).replace('brand:', '');
+    const target = groups.findIndex((g) => g.brand === toBrand);
+    if (target === -1) return;
+    await commitBrandMove(from, String(target + 1));
+  }
+
+  function makeSkuDragEnd(items: Array<{ row: any; idx: number }>) {
+    return async (e: DragEndEvent) => {
+      const { active, over } = e;
+      if (!over || active.id === over.id) return;
+      const fromIdx = Number(String(active.id).replace('sku:', ''));
+      const overIdx = Number(String(over.id).replace('sku:', ''));
+      const targetWithin = items.findIndex((it) => it.idx === overIdx);
+      if (targetWithin === -1) return;
+      await commitSkuMove(fromIdx, String(targetWithin + 1));
+    };
+  }
+
+  const totalBrands = useMemo(() => {
+    const s = new Set<string>();
+    products.forEach((p: any) => s.add((p.sous_groupe || '').trim() || '(sans marque)'));
+    return s.size;
+  }, [products]);
 
   return (
     <PageShell
       title="Ordre des slides"
-      subtitle="Tapez la priorité souhaitée d'un SKU (1 = premier). Les autres se décalent automatiquement."
+      subtitle={`Glissez les marques et les SKUs pour réordonner (${totalBrands} marques, ${products.length} SKUs). Tout est mémorisé et survit aux ré-imports Excel/SAP.`}
     >
       <SectionCard
         icon={<ListOrdered size={16} />}
         accent={PC_ACCENT}
-        title={`Priorité (${products.length} SKU${products.length > 1 ? 's' : ''})`}
-        subtitle="Modifier le champ « Position » d'une ligne déclenche la réorganisation immédiatement (Entrée ou perte de focus)."
+        title="Ordre des marques + ordre des SKUs"
+        subtitle="Attrapez la poignée ⠿ d'une marque pour déplacer tout son bloc, ou celle d'un SKU pour le déplacer dans sa marque. Les champs numériques restent disponibles pour un saut précis."
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
           <div style={{ position: 'relative', flex: 1, maxWidth: 360 }}>
@@ -88,101 +249,228 @@ export function PlanCommercialOrderPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filtrer par nom, groupe ou sous-groupe…"
+              placeholder="Filtrer par marque, SKU ou groupe…"
               style={{
                 width: '100%', padding: '8px 10px 8px 32px',
                 border: '1px solid #e4e4e7', borderRadius: 8,
-                fontSize: 12.5, color: '#18181b', background: '#fff',
+                fontSize: 12.5, background: '#fff',
               }}
             />
           </div>
           <div style={{ color: '#71717a', fontSize: 11.5 }}>
-            {filtered.length} affiché{filtered.length > 1 ? 's' : ''} sur {products.length}
+            {groups.reduce((s, g) => s + g.items.length, 0)} SKUs sur {products.length}
+            {dragDisabled && (
+              <span style={{ color: PC_ACCENT, marginLeft: 8, fontWeight: 600 }}>
+                — glisser désactivé pendant la recherche
+              </span>
+            )}
           </div>
+          <button
+            onClick={applyDefaultOrder}
+            title={`Réordonne par famille de produits selon la liste ${presetLabel} (poudre main → IRIS → Matic → A+ → Javel → …)`}
+            style={{ ...pcButton.base, ...pcButton.primary, marginLeft: 'auto' }}
+          >
+            <Wand2 size={13} /> Ordre par défaut {presetLabel}
+          </button>
         </div>
 
-        <div style={{
-          border: '1px solid #e4e4e7', borderRadius: 8, overflow: 'hidden',
-          background: '#fff',
-        }}>
-          <div style={{
-            display: 'grid',
-            gridTemplateColumns: '80px 90px 1fr 200px 160px',
-            padding: '10px 14px', background: '#fafafa',
-            borderBottom: '1px solid #e4e4e7',
-            fontSize: 11, fontWeight: 700, color: '#71717a', letterSpacing: 0.3,
-            textTransform: 'uppercase',
-          }}>
-            <div>Position</div>
-            <div>Nouvelle</div>
-            <div>SKU</div>
-            <div>Sous-groupe / Marque</div>
-            <div>Groupe / Canal</div>
-          </div>
-          {filtered.length === 0 && (
-            <div style={{ padding: '24px 14px', color: '#a1a1aa', fontSize: 12.5, textAlign: 'center' }}>
-              Aucun SKU à afficher.
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onBrandDragEnd}>
+          <SortableContext
+            items={groups.map((g) => `brand:${g.brand}`)}
+            strategy={verticalListSortingStrategy}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {groups.map(({ brand, brandPos, items }) => {
+                const brandDraft = brandDrafts[brand];
+                const open = collapsed[brand] !== true;
+                return (
+                  <SortableBrand key={brand} brand={brand} dragDisabled={dragDisabled}>
+                    {(brandHandle) => (
+                      <div style={{
+                        border: '1px solid #e4e4e7', borderRadius: 8, background: '#fff', overflow: 'hidden',
+                      }}>
+                        {/* Brand header */}
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: '26px 36px 1fr 200px',
+                          padding: '12px 14px',
+                          background: `linear-gradient(90deg, ${PC_ACCENT}1A, #ffffff)`,
+                          borderBottom: open ? '1px solid #e4e4e7' : 'none',
+                          alignItems: 'center', gap: 10,
+                        }}>
+                          <button
+                            {...brandHandle}
+                            style={{ ...gripStyle, cursor: dragDisabled ? 'default' : 'grab' }}
+                            title={dragDisabled ? 'Effacez la recherche pour glisser' : 'Glisser la marque'}
+                          >
+                            <GripVertical size={15} />
+                          </button>
+                          <button
+                            onClick={() => setCollapsed((c) => ({ ...c, [brand]: open }))}
+                            style={{
+                              width: 28, height: 28, border: 'none', background: 'transparent',
+                              cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}
+                            title={open ? 'Replier' : 'Déplier'}
+                          >
+                            {open ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </button>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Tag size={14} style={{ color: PC_ACCENT }} />
+                            <span style={{ fontSize: 14, fontWeight: 700, color: '#18181b' }}>{brand}</span>
+                            <span style={{ fontSize: 11.5, color: '#71717a' }}>
+                              · {items.length} SKU{items.length > 1 ? 's' : ''}
+                            </span>
+                            <span style={{ fontSize: 11.5, color: '#a1a1aa', marginLeft: 'auto' }}>
+                              Position globale de la marque : #{brandPos + 1}
+                            </span>
+                          </div>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
+                            <span style={{ fontSize: 11, color: '#71717a' }}>Position marque</span>
+                            <input
+                              type="number" min={1}
+                              value={brandDraft ?? ''}
+                              placeholder={String(brandPos + 1)}
+                              onChange={(e) => setBrandDrafts((d) => ({ ...d, [brand]: e.target.value }))}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                                else if (e.key === 'Escape') {
+                                  setBrandDrafts((d) => { const { [brand]: _, ...rest } = d; return rest; });
+                                  (e.currentTarget as HTMLInputElement).blur();
+                                }
+                              }}
+                              onBlur={(e) => {
+                                const v = e.target.value.trim();
+                                if (v) commitBrandMove(brand, v);
+                              }}
+                              style={{
+                                width: 70, padding: '5px 8px', textAlign: 'center',
+                                border: `1px solid ${brandDraft ? PC_ACCENT : '#d4d4d8'}`,
+                                borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+                              }}
+                            />
+                          </label>
+                        </div>
+
+                        {/* Brand body */}
+                        {open && (
+                          <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragEnd={makeSkuDragEnd(items)}
+                          >
+                            <div style={{
+                              display: 'grid',
+                              gridTemplateColumns: '26px 66px 90px 110px 1fr 160px',
+                              padding: '8px 14px', background: '#fafafa',
+                              borderBottom: '1px solid #f4f4f5',
+                              fontSize: 10.5, fontWeight: 700, color: '#71717a',
+                              letterSpacing: 0.3, textTransform: 'uppercase',
+                              gap: 10, alignItems: 'center',
+                            }}>
+                              <div />
+                              <div>Slide</div>
+                              <div>Pos. globale</div>
+                              <div>Pos. marque</div>
+                              <div>SKU</div>
+                              <div>Groupe / Canal</div>
+                            </div>
+                            <SortableContext
+                              items={items.map(({ idx }) => `sku:${idx}`)}
+                              strategy={verticalListSortingStrategy}
+                            >
+                              {items.map(({ row, idx }, withinIdx) => {
+                                const draft = skuDrafts[idx];
+                                return (
+                                  <SortableSku key={idx} id={`sku:${idx}`} dragDisabled={dragDisabled}>
+                                    {(skuHandle) => (
+                                      <div
+                                        style={{
+                                          display: 'grid',
+                                          gridTemplateColumns: '26px 66px 90px 110px 1fr 160px',
+                                          padding: '7px 14px',
+                                          borderBottom: '1px solid #f4f4f5',
+                                          alignItems: 'center',
+                                          fontSize: 12.5,
+                                          gap: 10,
+                                          background: '#fff',
+                                        }}
+                                      >
+                                        <button
+                                          {...skuHandle}
+                                          style={{ ...gripStyle, cursor: dragDisabled ? 'default' : 'grab' }}
+                                          title={dragDisabled ? 'Effacez la recherche pour glisser' : 'Glisser le SKU'}
+                                        >
+                                          <GripVertical size={13} />
+                                        </button>
+                                        {/* Mini slide thumbnail (server-cached) */}
+                                        <div style={{
+                                          width: 58, height: 33, borderRadius: 4, overflow: 'hidden',
+                                          background: '#f8f8f8', border: '1px solid #ececee',
+                                        }}>
+                                          <img
+                                            src={api.previewProductUrl(idx, previewBust, 0, 116)}
+                                            alt=""
+                                            loading="lazy"
+                                            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                                            onError={(e) => { (e.target as HTMLImageElement).style.visibility = 'hidden'; }}
+                                          />
+                                        </div>
+                                        <div style={{ fontWeight: 700, color: '#18181b' }}>#{idx + 1}</div>
+                                        <div>
+                                          <input
+                                            type="number" min={1} max={items.length}
+                                            value={draft ?? ''}
+                                            placeholder={String(withinIdx + 1)}
+                                            onChange={(e) => setSkuDrafts((d) => ({ ...d, [idx]: e.target.value }))}
+                                            onKeyDown={(e) => {
+                                              if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur();
+                                              else if (e.key === 'Escape') {
+                                                setSkuDrafts((d) => { const { [idx]: _, ...rest } = d; return rest; });
+                                                (e.currentTarget as HTMLInputElement).blur();
+                                              }
+                                            }}
+                                            onBlur={(e) => {
+                                              const v = e.target.value.trim();
+                                              if (v) commitSkuMove(idx, v);
+                                            }}
+                                            style={{
+                                              width: 64, padding: '4px 8px', textAlign: 'center',
+                                              border: `1px solid ${draft ? PC_ACCENT : '#e4e4e7'}`,
+                                              borderRadius: 6, fontSize: 12.5, fontWeight: 600,
+                                            }}
+                                          />
+                                        </div>
+                                        <div style={{ color: '#18181b', fontWeight: 500 }}>
+                                          {row.nom || <span style={{ color: '#d4d4d8' }}>(sans nom)</span>}
+                                        </div>
+                                        <div style={{ color: '#71717a', fontSize: 12 }}>
+                                          {row.groupe || '—'}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </SortableSku>
+                                );
+                              })}
+                            </SortableContext>
+                          </DndContext>
+                        )}
+                      </div>
+                    )}
+                  </SortableBrand>
+                );
+              })}
+              {groups.length === 0 && (
+                <div style={{
+                  padding: '24px 14px', border: '1px dashed #e4e4e7', borderRadius: 8,
+                  color: '#a1a1aa', textAlign: 'center', fontSize: 12.5, background: '#fff',
+                }}>
+                  Aucun SKU à afficher.
+                </div>
+              )}
             </div>
-          )}
-          {filtered.map(({ row, idx }) => {
-            const draft = drafts[idx];
-            return (
-              <div
-                key={idx}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '80px 90px 1fr 200px 160px',
-                  padding: '10px 14px',
-                  borderBottom: '1px solid #f4f4f5',
-                  alignItems: 'center',
-                  fontSize: 12.5,
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#52525b' }}>
-                  <GripVertical size={13} style={{ color: '#d4d4d8' }} />
-                  <span style={{ fontWeight: 700, color: '#18181b' }}>#{idx + 1}</span>
-                </div>
-                <div>
-                  <input
-                    type="number"
-                    min={1}
-                    max={products.length}
-                    value={draft ?? ''}
-                    placeholder={String(idx + 1)}
-                    onChange={(e) => setDrafts((d) => ({ ...d, [idx]: e.target.value }))}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.currentTarget.blur();
-                      } else if (e.key === 'Escape') {
-                        setDrafts((d) => { const { [idx]: _, ...rest } = d; return rest; });
-                        e.currentTarget.blur();
-                      }
-                    }}
-                    onBlur={(e) => {
-                      const v = e.target.value.trim();
-                      if (v) commitMove(idx, v);
-                    }}
-                    style={{
-                      width: 64, padding: '5px 8px', textAlign: 'center',
-                      border: `1px solid ${draft ? PC_ACCENT : '#e4e4e7'}`,
-                      borderRadius: 6, fontSize: 12.5, fontWeight: 600,
-                      color: '#18181b', background: '#fff',
-                    }}
-                  />
-                </div>
-                <div style={{ color: '#18181b', fontWeight: 500 }}>
-                  {row.nom || <span style={{ color: '#d4d4d8' }}>(sans nom)</span>}
-                </div>
-                <div style={{ color: '#52525b' }}>
-                  {row.sous_groupe || '—'}
-                </div>
-                <div style={{ color: '#71717a', fontSize: 12 }}>
-                  {row.groupe || '—'}
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          </SortableContext>
+        </DndContext>
       </SectionCard>
 
       {toast && (

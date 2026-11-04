@@ -229,29 +229,49 @@ def _build_basename_index(image_dir: Path) -> Dict[str, str]:
 
 
 def find_relative_path(image_dir: Path, name: str) -> Optional[str]:
-    """Resolve a filename — possibly bare — to its path relative to image_dir.
+    """Resolve a filename — possibly bare or prefixed with a subfolder —
+    to its path relative to image_dir.
 
-    Tries an exact path first (so ``MIO/foo.png`` keeps working), then falls
-    back to a basename lookup (so old Excel files referencing ``foo.png``
-    still resolve once the file is moved into a subfolder)."""
+    Resolution order, stopping at the first hit:
+      1. Exact path under image_dir (``MIO/foo.png`` → ``image_dir/MIO/foo.png``).
+      2. Basename lookup over the recursive index (``foo.png`` → wherever).
+         The basename of the input is used, so ``MIO/foo.png`` still hits
+         even when the subfolder part is wrong (renamed brand folder, case
+         mismatch on Linux, …).
+      3. Case-insensitive basename lookup — last-resort safety net for the
+         all-too-common "WSL volume case-folded my filename" footgun.
+    """
     if not name:
         return None
     direct = image_dir / name
     if direct.is_file():
         return name
-    if "/" in name or "\\" in name:
-        return None
+
+    # Extract the basename — works for both "MIO/foo.png" and bare "foo.png".
+    basename = name.replace("\\", "/").rsplit("/", 1)[-1]
+
     cache = _BASENAME_INDEX.get(image_dir)
     if cache is None:
         cache = _build_basename_index(image_dir)
         _BASENAME_INDEX[image_dir] = cache
-    hit = cache.get(name)
+
+    hit = cache.get(basename)
     if hit:
         return hit
-    # Cache miss could mean a stale index — rebuild once and retry.
+
+    # Cache miss — rebuild once in case the file was added since startup.
     cache = _build_basename_index(image_dir)
     _BASENAME_INDEX[image_dir] = cache
-    return cache.get(name)
+    hit = cache.get(basename)
+    if hit:
+        return hit
+
+    # Last resort: case-insensitive match on basename.
+    needle = basename.lower()
+    for cached_name, rel in cache.items():
+        if cached_name.lower() == needle:
+            return rel
+    return None
 
 
 # --- Querying ---------------------------------------------------------------

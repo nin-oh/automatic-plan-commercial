@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, Upload, X } from 'lucide-react';
 
 export interface ImageAsset {
   filename: string;
@@ -19,12 +19,19 @@ export interface ImagePickerProps {
   onPick: (filename: string) => void;
   onClose: () => void;
   initialSearch?: string;
+  /** Optional: when provided, an "Upload from computer" button appears in
+   *  the picker header. Picking a file fires this callback (the modal
+   *  closes after) so callers can persist the file and update state. */
+  onUpload?: (file: File) => void;
+  /** Accent color for the upload button. Falls back to a neutral red. */
+  uploadAccent?: string;
 }
 
 /** Light-surface modal for picking an asset filename from a filtered grid. */
 export function ImagePicker({
   open, title = 'Bibliothèque', emptyHint = 'Aucune image',
   assets, resolveUrl, onPick, onClose, initialSearch = '',
+  onUpload, uploadAccent = '#dc2626',
 }: ImagePickerProps) {
   const [search, setSearch] = useState(initialSearch);
   useEffect(() => { if (open) setSearch(initialSearch); }, [open, initialSearch]);
@@ -55,18 +62,37 @@ export function ImagePicker({
       >
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '14px 16px', borderBottom: '1px solid #f4f4f5',
+          padding: '14px 16px', borderBottom: '1px solid #f4f4f5', gap: 10,
         }}>
           <div style={{ color: '#18181b', fontWeight: 700, fontSize: 14 }}>{title}</div>
-          <button
-            onClick={onClose}
-            aria-label="Fermer"
-            style={{
-              background: 'transparent', border: 'none', color: '#71717a',
-              cursor: 'pointer', display: 'flex', padding: 6,
-              borderRadius: 6,
-            }}
-          ><X size={16} /></button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            {onUpload && (
+              <label style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '7px 11px', borderRadius: 8,
+                background: uploadAccent, color: '#ffffff',
+                fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                border: 'none',
+              }}>
+                <Upload size={13} /> Téléverser
+                <input type="file" accept="image/*" style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) { onUpload(f); onClose(); }
+                    e.target.value = '';
+                  }} />
+              </label>
+            )}
+            <button
+              onClick={onClose}
+              aria-label="Fermer"
+              style={{
+                background: 'transparent', border: 'none', color: '#71717a',
+                cursor: 'pointer', display: 'flex', padding: 6,
+                borderRadius: 6,
+              }}
+            ><X size={16} /></button>
+          </div>
         </div>
 
         <div style={{ padding: 14, borderBottom: '1px solid #f4f4f5' }}>

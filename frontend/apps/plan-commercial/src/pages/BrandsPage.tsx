@@ -6,7 +6,7 @@ import * as api from '../api';
 import { usePlanCommercial } from '../store/usePlanCommercial';
 
 export function PlanCommercialBrandsPage() {
-  const { products, refreshProducts, refreshImages, bumpPreview } = usePlanCommercial();
+  const { products, images, refreshProducts, refreshImages, bumpPreview } = usePlanCommercial();
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   useEffect(() => { refreshProducts(); refreshImages(); }, [refreshProducts, refreshImages]);
@@ -36,8 +36,19 @@ export function PlanCommercialBrandsPage() {
      >
       <BrandWorkflow
         rows={rows}
+        images={images}
         resolveImageUrl={api.imageUrl}
         accent={PC_ACCENT}
+        onPickSkuPackshot={async (skuIndex, filename) => {
+          try {
+            await api.patchProduct(skuIndex, { packshot: filename });
+            await refreshProducts();
+            bumpPreview();
+            setToast({ message: `Packshot mis à jour`, type: 'success' });
+          } catch (e: any) {
+            setToast({ message: e?.message ?? 'Erreur', type: 'error' });
+          }
+        }}
         onUploadBrandLogo={async (brand, field, file) => {
           try {
             const target = `${slugify(brand)}.png`;
@@ -48,6 +59,23 @@ export function PlanCommercialBrandsPage() {
             await refreshImages();
             bumpPreview();
             setToast({ message: `Logo appliqué à ${brand}`, type: 'success' });
+          } catch (e: any) {
+            setToast({ message: e?.message ?? 'Erreur', type: 'error' });
+          }
+        }}
+        onUploadSkuPackshot={async (skuIndex, brand, file) => {
+          try {
+            // 1) Persist the file under the brand subfolder
+            const uploaded = await api.uploadImages([file], brand, 'packshot');
+            // 2) The API returns the canonical filename (incl. subfolder prefix
+            //    like "PAPI/foo.png") — use it as the packshot field so the
+            //    resolver picks it up without falling back to basename lookup.
+            const fname = uploaded[0]?.filename || file.name;
+            await api.patchProduct(skuIndex, { packshot: fname });
+            await refreshProducts();
+            await refreshImages();
+            bumpPreview();
+            setToast({ message: `Packshot mis à jour`, type: 'success' });
           } catch (e: any) {
             setToast({ message: e?.message ?? 'Erreur', type: 'error' });
           }

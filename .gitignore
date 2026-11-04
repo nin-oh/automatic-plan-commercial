@@ -28,6 +28,10 @@ test.pdf
 test.pptx
 
 # ─── Local user data (lives in PC_DATA_DIR for new installs) ───────────────
+# Docker's default PC_DATA_HOST is `./data` — created automatically when the
+# container starts. We never commit any user-uploaded packshots, generated
+# decks, or SQLite state.
+data/
 assets/images/
 assets/session.json
 assets/state.db

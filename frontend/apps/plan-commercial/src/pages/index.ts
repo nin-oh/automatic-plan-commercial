@@ -6,3 +6,4 @@ export { PlanCommercialImagesPage as ImagesPage } from './ImagesPage';
 export { PlanCommercialGeneratePage as GeneratePage } from './GeneratePage';
 export { PlanCommercialOrderPage as OrderPage } from './OrderPage';
 export { PlanCommercialSapImportPage as SapImportPage } from './SapImportPage';
+export { PlanCommercialCataloguePage as CataloguePage } from './CataloguePage';

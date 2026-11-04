@@ -1,5 +1,7 @@
 import { BrandedPageHeader } from '@amafin/ui';
 import type { ReactNode } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { ChevronLeft, ChevronRight, Check } from 'lucide-react';
 
 /** Plan Commercial brand constants — used by pages that still need raw color
  * values for inline buttons / KPI accents. The shell, sidebar, and SmartTable
@@ -35,6 +37,102 @@ export const pcButton = {
   },
 } as const;
 
+/** Ordered workflow — the steps a user walks through to produce a deck.
+ * The WorkflowBar renders these as clickable pills with Précédent/Suivant
+ * shortcuts so moving between pages doesn't require the sidebar. */
+const FLOW: { path: string; label: string }[] = [
+  { path: '/deck',      label: 'Deck' },
+  { path: '/content',   label: 'Contenu' },
+  { path: '/order',     label: 'Ordre' },
+  { path: '/brands',    label: 'Marques' },
+  { path: '/images',    label: 'Images' },
+  { path: '/catalogue', label: 'Catalogue' },
+  { path: '/generate',  label: 'Génération' },
+];
+
+function WorkflowBar() {
+  const { pathname } = useLocation();
+  const navigate = useNavigate();
+  const idx = FLOW.findIndex((s) => s.path === pathname);
+  if (idx === -1) return null;   // dashboard / SAP page — not part of the flow
+
+  const prev = idx > 0 ? FLOW[idx - 1] : null;
+  const next = idx < FLOW.length - 1 ? FLOW[idx + 1] : null;
+
+  const navBtn = (step: { path: string; label: string } | null, dir: 'prev' | 'next') => (
+    <button
+      disabled={!step}
+      onClick={() => step && navigate(step.path)}
+      title={step ? step.label : undefined}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+        fontFamily: 'Inter, sans-serif', whiteSpace: 'nowrap',
+        cursor: step ? 'pointer' : 'default',
+        border: '1px solid #e4e4e7',
+        background: step ? '#ffffff' : '#fafafa',
+        color: step ? '#3f3f46' : '#d4d4d8',
+        transition: 'all 140ms',
+      }}
+    >
+      {dir === 'prev' && <ChevronLeft size={14} />}
+      {step ? step.label : dir === 'prev' ? 'Début' : 'Fin'}
+      {dir === 'next' && <ChevronRight size={14} />}
+    </button>
+  );
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      padding: '8px 12px', marginBottom: 14,
+      background: '#ffffff', border: '1px solid #ececee', borderRadius: 12,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+    }}>
+      {navBtn(prev, 'prev')}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1, flexWrap: 'wrap', justifyContent: 'center' }}>
+        {FLOW.map((step, i) => {
+          const active = i === idx;
+          const done = i < idx;
+          return (
+            <div key={step.path} style={{ display: 'flex', alignItems: 'center' }}>
+              {i > 0 && (
+                <div style={{
+                  width: 16, height: 1.5, margin: '0 2px',
+                  background: done || active ? `${PC_ACCENT}66` : '#e4e4e7',
+                }} />
+              )}
+              <button
+                onClick={() => navigate(step.path)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  padding: '4px 10px', borderRadius: 999, fontSize: 11.5,
+                  fontWeight: active ? 700 : 500, fontFamily: 'Inter, sans-serif',
+                  cursor: 'pointer', whiteSpace: 'nowrap', transition: 'all 140ms',
+                  border: active ? 'none' : '1px solid transparent',
+                  background: active ? PC_GRADIENT : 'transparent',
+                  color: active ? '#fff' : done ? '#9a3412' : '#71717a',
+                  boxShadow: active ? `0 3px 10px ${PC_ACCENT}45` : 'none',
+                }}
+              >
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  width: 15, height: 15, borderRadius: 999, fontSize: 9.5, fontWeight: 700,
+                  background: active ? 'rgba(255,255,255,0.25)' : done ? `${PC_ACCENT}22` : '#f4f4f5',
+                  color: active ? '#fff' : done ? PC_ACCENT : '#a1a1aa',
+                }}>
+                  {done ? <Check size={9} strokeWidth={3.5} /> : i + 1}
+                </span>
+                {step.label}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {navBtn(next, 'next')}
+    </div>
+  );
+}
+
 /** Thin app-local wrapper around the shared `BrandedPageHeader` molecule —
  * applies the Plan Commercial brand so each page just calls `<PageShell>` and
  * gets the orange eyebrow + correct accent without repeating the values. */
@@ -55,6 +153,7 @@ export function PageShell({
       accent={PC_ACCENT}
       accent2={PC_ACCENT2}
     >
+      <WorkflowBar />
       {children}
     </BrandedPageHeader>
   );

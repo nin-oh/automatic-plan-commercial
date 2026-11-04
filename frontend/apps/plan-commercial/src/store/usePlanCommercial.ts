@@ -11,6 +11,8 @@ import type { ImageAsset } from '@amafin/ui';
 import * as api from '../api';
 import type { DeckState, ProductRow } from '../api';
 
+export type ContentView = 'editor' | 'table' | 'grid';
+
 export interface PCStore {
   state: DeckState | null;
   products: ProductRow[];
@@ -19,6 +21,14 @@ export interface PCStore {
   /** ms timestamp that bumps every time something changes — used as a cache
    *  buster on the preview <img src> URL so it reloads after each edit. */
   previewBust: number;
+
+  /** Selected product on the Contenu page — lives in the store (not page
+   *  state) so navigating to Images/Ordre and back doesn't lose the spot. */
+  slideIdx: number;
+  setSlideIdx: (idx: number) => void;
+  /** Which Contenu mode is active: visual editor or bulk table. */
+  contentView: ContentView;
+  setContentView: (v: ContentView) => void;
 
   /** Optimistic — mutate the local state, then sync. */
   bumpPreview: () => void;
@@ -37,6 +47,14 @@ export const usePlanCommercial = create<PCStore>((set, get) => ({
   images: [],
   loading: false,
   previewBust: Date.now(),
+
+  slideIdx: 0,
+  setSlideIdx: (idx) => set({ slideIdx: Math.max(0, idx) }),
+  contentView: (sessionStorage.getItem('pc-content-view') as ContentView) || 'editor',
+  setContentView: (v) => {
+    sessionStorage.setItem('pc-content-view', v);
+    set({ contentView: v });
+  },
 
   bumpPreview: () => set({ previewBust: Date.now() }),
 

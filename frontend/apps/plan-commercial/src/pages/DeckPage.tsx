@@ -48,6 +48,8 @@ export function PlanCommercialDeckPage() {
           usePlanCommercial.setState({ state: next, previewBust: Date.now() });
         }}
         resolveImage={api.imageUrl}
+        // canal param → the ribbon follows the dropdown instantly.
+        bannerPreviewSrc={`/api/preview/banner?canal=${encodeURIComponent(state.canal || '')}`}
       />
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </PageShell>
